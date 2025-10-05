@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/pinyin">
+        <file>data/pinyin.txt</file>
+    </qresource>
+</RCC>

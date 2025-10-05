@@ -1,0 +1,17 @@
+<RCC>
+    <qresource prefix="/icon1">
+        <file>icons/quill-pen-fill.png</file>
+        <file>icons/quill-pen-line.png</file>
+        <file>icons/石墨文档.png</file>
+        <file>icons/用研.png</file>
+        <file>icons/羽毛笔 (1).png</file>
+        <file>icons/羽毛笔.png</file>
+    </qresource>
+    <qresource prefix="/icons2">
+        <file>icons/壁纸蓝色1.jpg</file>
+        <file>icons/派大星和海绵宝宝.jpg</file>
+        <file>icons/树和蝴蝶.jpg</file>
+        <file>icons/树木.jpg</file>
+    </qresource>
+    <qresource prefix="/data"/>
+</RCC>

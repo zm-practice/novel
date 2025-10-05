@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/book"/>
+    <qresource prefix="/icons"/>
+    <qresource prefix="/书签"/>
+</RCC>
