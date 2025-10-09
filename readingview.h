@@ -83,14 +83,18 @@
 
 #include <QWidget>
 #include <QTextCharFormat>
+#include<QLineEdit>
+#include <QPushButton>
 #include "bookdata.h"
 #include "dictionaryservice.h"
+#include "tooltippopup.h" // ★★★ 直接包含头文件 ★★★
 
 class QListWidgetItem;
 class BookManager;
 class QTimer;
 class TooltipPopup;
 class QMouseEvent;
+class QTextCursor;
 
 namespace Ui {
 class ReadingView;
@@ -111,7 +115,8 @@ public:
     void setAutoScrollSpeed(int interval);
 
 protected:
-    void mouseDoubleClickEvent(QMouseEvent *event) override;
+    //void mouseDoubleClickEvent(QMouseEvent *event) override;
+     bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
     void on_chaptersListWidget_itemClicked(QListWidgetItem *item);
@@ -125,10 +130,22 @@ private slots:
     void on_autoScrollButton_toggled(bool checked);
     void on_speedSlider_valueChanged(int value);
     void onAutoScrollTimerTimeout();
+    void toggleChapterList();
+    // 新加！！文本查找功能
+
+    void findText(const QString& text, bool caseSensitive = false);
+    void findNext();
+    void findPrevious();
+    // 新加！！翻页功能
+    void nextPage();
+    void previousPage();
+
 
 private:
     void parseChapters(const QString& content);
     void applyBookmarksToChapter(int chapterIndex);
+    // ★★★ 新增独立的双击处理函数 ★★★
+    void handleDoubleClick(QMouseEvent *event);
 
     Ui::ReadingView *ui;
     BookManager *m_bookManager = nullptr;
@@ -137,7 +154,29 @@ private:
     QStringList m_chapterContents;
     QTimer *m_autoScrollTimer;
     DictionaryService* m_dictionaryService;
-    TooltipPopup* m_tooltipPopup = nullptr;
+    TooltipPopup* m_tooltipPopup;
     QTextCharFormat m_bookmarkFormat;
+
+
+
+
+    // 新加！！辅助函数
+    void highlightFoundText(const QTextCursor& cursor);
+    void scrollToPosition(int position);//
+
+    int m_currentChapter;
+    int m_currentPosition;
+
+    // 新加！！
+    QLineEdit* m_searchLineEdit;
+    QPushButton* m_searchButton;
+    QPushButton* m_searchNextButton;
+    QPushButton* m_searchPrevButton;
+    QString m_lastSearchText;
+    bool m_lastSearchCaseSensitive;
+
+    // 新加！！章节列表控制
+    QPushButton* m_toggleChapterButton;
+    bool m_chapterListVisible;
 };
 #endif // READINGVIEW_H

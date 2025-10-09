@@ -421,6 +421,17 @@
 #include <QMouseEvent>
 #include <QTextCursor>
 #include <QApplication> // 用于获取屏幕信息
+#include <QSettings>
+#include <QScrollBar>
+#include <QMessageBox>
+#include <QInputDialog>
+#include <QPushButton>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QVBoxLayout>
+#include <QDebug>
+#include <QFileInfo>
 
 // ReadingView::ReadingView(QWidget *parent) :
 //     QWidget(parent),
@@ -468,7 +479,11 @@
 
 ReadingView::ReadingView(QWidget *parent) :
     QWidget(parent),
-    ui(new Ui::ReadingView)
+    ui(new Ui::ReadingView),
+    m_currentChapter(0),
+    m_currentPosition(0),
+    m_lastSearchCaseSensitive(false),
+    m_chapterListVisible(true) // 默认显示章节列表
 {
     ui->setupUi(this);
 
@@ -483,11 +498,24 @@ ReadingView::ReadingView(QWidget *parent) :
     m_autoScrollTimer = new QTimer(this);
     connect(m_autoScrollTimer, &QTimer::timeout, this, &ReadingView::onAutoScrollTimerTimeout);
 
-    // 查词服务
-    m_dictionaryService = new DictionaryService(this);
-    connect(m_dictionaryService, &DictionaryService::querySuccess, this, &ReadingView::onQuerySuccess);
-    connect(m_dictionaryService, &DictionaryService::queryError, this, &ReadingView::onQueryError);
+    // // 查词服务
+    // m_dictionaryService = new DictionaryService(this);
+    // connect(m_dictionaryService, &DictionaryService::querySuccess, this, &ReadingView::onQuerySuccess);
+    // connect(m_dictionaryService, &DictionaryService::queryError, this, &ReadingView::onQueryError);
 
+
+    // ★★★ 关键修复1: 在构造函数中创建 TooltipPopup ★★★
+    m_tooltipPopup = new TooltipPopup(this);
+
+    // ★★★ 关键修复2: 创建查词服务并连接信号 ★★★
+    m_dictionaryService = new DictionaryService(this);
+    connect(m_dictionaryService, &DictionaryService::querySuccess,
+            this, &ReadingView::onQuerySuccess);
+    connect(m_dictionaryService, &DictionaryService::queryError,
+            this, &ReadingView::onQueryError);
+
+    // ★★★ 关键修复3: 为 QTextBrowser 安装事件过滤器 ★★★
+    ui->textBrowser->viewport()->installEventFilter(this);
     // 初始化UI
     auto& settings = SettingsManager::instance();
     ui->speedSlider->setRange(10, 500);
@@ -500,6 +528,49 @@ ReadingView::ReadingView(QWidget *parent) :
     m_bookmarkFormat.setBackground(QColor(255, 255, 0, 50));
     m_bookmarkFormat.setUnderlineStyle(QTextCharFormat::DashUnderline);
     m_bookmarkFormat.setUnderlineColor(Qt::gray);
+
+    // 连接UI中的上一页/下一页按钮
+    connect(ui->prevPageButton, &QPushButton::clicked, this, &ReadingView::previousPage);
+    connect(ui->nextPageButton, &QPushButton::clicked, this, &ReadingView::nextPage);
+
+    // 创建搜索控件
+    m_searchLineEdit = new QLineEdit(this);
+    m_searchLineEdit->setPlaceholderText("搜索内容...");
+    m_searchLineEdit->setFixedWidth(200);
+
+    m_searchButton = new QPushButton("搜索", this);
+    connect(m_searchButton, &QPushButton::clicked, this, [this]() {
+        findText(m_searchLineEdit->text(), false);
+    });
+
+    m_searchNextButton = new QPushButton("下一个", this);
+    connect(m_searchNextButton, &QPushButton::clicked, this, &ReadingView::findNext);
+
+    m_searchPrevButton = new QPushButton("上一个", this);
+    connect(m_searchPrevButton, &QPushButton::clicked, this, &ReadingView::findPrevious);
+
+    // 创建章节切换按钮
+    m_toggleChapterButton = new QPushButton("隐藏章节", this);
+    connect(m_toggleChapterButton, &QPushButton::clicked, this, &ReadingView::toggleChapterList);
+
+    // 将搜索控件添加到布局中
+    QHBoxLayout* searchLayout = new QHBoxLayout();
+    searchLayout->addWidget(m_searchLineEdit);
+    searchLayout->addWidget(m_searchButton);
+    searchLayout->addWidget(m_searchNextButton);
+    searchLayout->addWidget(m_searchPrevButton);
+    searchLayout->addStretch();
+    searchLayout->addWidget(m_toggleChapterButton);
+
+    // 将搜索布局添加到界面上方
+    QVBoxLayout* mainLayout = qobject_cast<QVBoxLayout*>(layout());
+    if (mainLayout) {
+        mainLayout->insertLayout(0, searchLayout);
+    }
+
+    // 设置章节列表宽度更窄
+    ui->chaptersListWidget->setMaximumWidth(150);
+    applySettings();
 }
 
 ReadingView::~ReadingView()
@@ -563,67 +634,144 @@ ReadingView::~ReadingView()
 
 
 // --- ★★★ 实现一个全新的、绝对可靠的 mouseDoubleClickEvent ★★★ ---
-void ReadingView::mouseDoubleClickEvent(QMouseEvent *event)
+// void ReadingView::mouseDoubleClickEvent(QMouseEvent *event)
+// {
+//     // 1. 判断双击是否发生在 QTextBrowser 内部
+//     if (!ui->textBrowser->rect().contains(event->pos())) {
+//         // 如果点在了别处，执行默认行为并返回
+//         QWidget::mouseDoubleClickEvent(event);
+//         return;
+//     }
+
+//     // 2. 获取双击位置的光标
+//     QTextCursor cursor = ui->textBrowser->cursorForPosition(event->pos());
+
+//     // 3. 让光标自动选中其下的单词/汉字
+//     cursor.select(QTextCursor::WordUnderCursor);
+//     QString selectedText = cursor.selectedText().trimmed();
+
+//     // 4. 如果确实选中了内容
+//     if (!selectedText.isEmpty()) {
+//         qDebug() << "双击选中内容:" << selectedText; // 添加调试信息
+
+//         // 5. ★★★ 关键：确保弹窗实例存在 ★★★
+//         // 如果 m_tooltipPopup 是空的，就创建一个新的实例
+//         if (!m_tooltipPopup) {
+//             m_tooltipPopup = new TooltipPopup(this);
+//         }
+
+//         // 6. 准备一个“查询中...”的提示信息
+//         WordDefinition pendingDef;
+//         pendingDef.displayWord = selectedText;
+//         pendingDef.phonetic = "查询中...";
+
+//         // 7. 显示弹窗并发起查询
+//         m_tooltipPopup->showDefinition(pendingDef, event->globalPosition().toPoint()); // 使用事件提供的全局坐标
+//         m_dictionaryService->query(selectedText);
+
+//         // 8. 接受事件，阻止 QTextBrowser 执行它自己的默认双击行为
+//         event->accept();
+//     } else {
+//         // 如果没有选中任何内容，执行默认行为
+//         QWidget::mouseDoubleClickEvent(event);
+//     }
+// }
+
+
+// ★★★ 关键修复4: 使用事件过滤器捕获双击事件 ★★★
+bool ReadingView::eventFilter(QObject *obj, QEvent *event)
 {
-    // 1. 判断双击是否发生在 QTextBrowser 内部
-    if (!ui->textBrowser->rect().contains(event->pos())) {
-        // 如果点在了别处，执行默认行为并返回
-        QWidget::mouseDoubleClickEvent(event);
+    // 只处理 textBrowser 的 viewport 上的鼠标双击事件
+    if (obj == ui->textBrowser->viewport() &&
+        event->type() == QEvent::MouseButtonDblClick)
+    {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+        handleDoubleClick(mouseEvent);
+        return true; // 事件已处理,阻止传播
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
+// ★★★ 关键修复5: 独立的双击处理函数 ★★★
+void ReadingView::handleDoubleClick(QMouseEvent *event)
+{
+    qDebug() << "双击事件触发"; // 调试信息
+
+    // 获取点击位置的光标
+    QTextCursor cursor = ui->textBrowser->cursorForPosition(event->pos());
+    int clickPos = cursor.position();
+
+    QString selectedText;
+
+    // ★★★ 核心修复: 智能选择单字或单词 ★★★
+    // 获取光标位置的字符
+    QChar charAtPos = ui->textBrowser->document()->characterAt(clickPos);
+
+    qDebug() << "点击位置的字符:" << charAtPos << "Unicode:" << QString::number(charAtPos.unicode(), 16);
+
+    // 判断是否为中文字符 (CJK统一汉字范围)
+    if (charAtPos.unicode() >= 0x4E00 && charAtPos.unicode() <= 0x9FFF) {
+        // 是中文 - 只选择单个字符
+        cursor.setPosition(clickPos);
+        cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+        selectedText = cursor.selectedText();
+        qDebug() << "识别为中文,选中单字:" << selectedText;
+    }
+    else if (charAtPos.isLetter()) {
+        // 是英文字母 - 选择整个单词
+        cursor.select(QTextCursor::WordUnderCursor);
+        selectedText = cursor.selectedText();
+        qDebug() << "识别为英文,选中单词:" << selectedText;
+    }
+    else {
+        qDebug() << "既不是中文也不是英文字母";
         return;
     }
 
-    // 2. 获取双击位置的光标
-    QTextCursor cursor = ui->textBrowser->cursorForPosition(event->pos());
+    selectedText = selectedText.trimmed();
 
-    // 3. 让光标自动选中其下的单词/汉字
-    cursor.select(QTextCursor::WordUnderCursor);
-    QString selectedText = cursor.selectedText().trimmed();
-
-    // 4. 如果确实选中了内容
-    if (!selectedText.isEmpty()) {
-        qDebug() << "双击选中内容:" << selectedText; // 添加调试信息
-
-        // 5. ★★★ 关键：确保弹窗实例存在 ★★★
-        // 如果 m_tooltipPopup 是空的，就创建一个新的实例
-        if (!m_tooltipPopup) {
-            m_tooltipPopup = new TooltipPopup(this);
-        }
-
-        // 6. 准备一个“查询中...”的提示信息
-        WordDefinition pendingDef;
-        pendingDef.displayWord = selectedText;
-        pendingDef.phonetic = "查询中...";
-
-        // 7. 显示弹窗并发起查询
-        m_tooltipPopup->showDefinition(pendingDef, event->globalPosition().toPoint()); // 使用事件提供的全局坐标
-        m_dictionaryService->query(selectedText);
-
-        // 8. 接受事件，阻止 QTextBrowser 执行它自己的默认双击行为
-        event->accept();
-    } else {
-        // 如果没有选中任何内容，执行默认行为
-        QWidget::mouseDoubleClickEvent(event);
+    if (selectedText.isEmpty()) {
+        qDebug() << "未选中任何文本";
+        return;
     }
+
+    // 显示"查询中..."提示
+    WordDefinition pendingDef;
+    pendingDef.displayWord = selectedText;
+    pendingDef.phonetic = "查询中...";
+    pendingDef.definition = "";
+
+    // 计算弹窗位置(在鼠标下方偏移一点)
+    QPoint globalPos = ui->textBrowser->mapToGlobal(event->pos());
+    m_tooltipPopup->showDefinition(pendingDef, globalPos);
+
+    // 发起查询
+    m_dictionaryService->query(selectedText);
+    qDebug() << "已发起查询请求:" << selectedText;
 }
+
 
 // --- 实现响应槽函数 ---
 void ReadingView::onQuerySuccess(const WordDefinition &result)
 {
+    qDebug() << "查询成功:" << result.displayWord;
     if (m_tooltipPopup) {
         m_tooltipPopup->showDefinition(result, QCursor::pos());
     }
 }
 
+// 响应查询失败
 void ReadingView::onQueryError(const QString &errorString)
 {
+    qDebug() << "查询失败:" << errorString;
     if (m_tooltipPopup) {
         WordDefinition errorResult;
         errorResult.displayWord = "查询失败";
+        errorResult.phonetic = "";
         errorResult.definition = errorString;
         m_tooltipPopup->showDefinition(errorResult, QCursor::pos());
     }
 }
-
 
 //自动阅读！！！
 // ★★★ 实现公共控制接口 ★★★
@@ -685,6 +833,11 @@ void ReadingView::loadBook(const BookInfo &book)
 {
     //书签！！！
     m_currentBook = book; // ★★★ 记下当前的书籍 ★★★
+
+    // 确保书籍有唯一ID，如果没有则使用文件路径作为ID
+    if (m_currentBook.id.isEmpty()) {
+        m_currentBook.id = m_currentBook.filePath;
+    }
     QFile file(book.filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         ui->textBrowser->setText("错误：无法打开文件 " + book.filePath);
@@ -698,6 +851,8 @@ void ReadingView::loadBook(const BookInfo &book)
     file.close();
 
     parseChapters(content);
+
+    QApplication::processEvents();//!!!
 }
 
 
@@ -965,4 +1120,291 @@ void ReadingView::applyBookmarksToChapter(int chapterIndex)
         }
     }
     cursor.clearSelection();
+}
+
+
+void ReadingView::findText(const QString& text, bool caseSensitive)
+{
+    if (text.isEmpty()) return;
+
+    m_lastSearchText = text;
+    m_lastSearchCaseSensitive = caseSensitive;
+
+    QTextDocument::FindFlags flags;
+    if (caseSensitive) {
+        flags |= QTextDocument::FindCaseSensitively;
+    }
+
+    // 先在当前章节搜索
+    QTextCursor cursor = ui->textBrowser->textCursor();
+    cursor.setPosition(0); // 从文档开头开始搜索
+    ui->textBrowser->setTextCursor(cursor);
+
+    bool found = ui->textBrowser->find(text, flags);
+    if (found) {
+        highlightFoundText(ui->textBrowser->textCursor());
+        return;
+    }
+
+    // 如果当前章节未找到，则在其他章节中搜索
+    int originalChapter = m_currentChapter;
+
+    // 从下一章开始搜索
+    for (int i = 1; i < m_chapterContents.size(); i++) {
+        int chapterToSearch = (originalChapter + i) % m_chapterContents.size();
+
+        // 检查该章节内容是否包含搜索文本
+        if (m_chapterContents[chapterToSearch].contains(text,
+                                                        caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+            // 切换到包含文本的章节
+            m_currentChapter = chapterToSearch;
+            ui->chaptersListWidget->setCurrentRow(chapterToSearch);
+            ui->textBrowser->setText(m_chapterContents.at(chapterToSearch));
+
+            // 在新章节中搜索
+            cursor = ui->textBrowser->textCursor();
+            cursor.setPosition(0);
+            ui->textBrowser->setTextCursor(cursor);
+
+            if (ui->textBrowser->find(text, flags)) {
+                highlightFoundText(ui->textBrowser->textCursor());
+                QMessageBox::information(this, "查找结果",
+                                         QString("在第 %1 章找到匹配文本").arg(chapterToSearch + 1));
+                return;
+            }
+        }
+    }
+
+    // 如果所有章节都未找到
+    QMessageBox::information(this, "查找结果", "在全书中未找到匹配文本");
+
+    // 恢复到原始章节
+    if (m_currentChapter != originalChapter) {
+        m_currentChapter = originalChapter;
+        ui->chaptersListWidget->setCurrentRow(originalChapter);
+        ui->textBrowser->setText(m_chapterContents.at(originalChapter));
+    }
+}
+
+
+
+
+void ReadingView::findNext()
+{
+    if (m_lastSearchText.isEmpty()) return;
+
+    QTextDocument::FindFlags flags;
+    if (m_lastSearchCaseSensitive) {
+        flags |= QTextDocument::FindCaseSensitively;
+    }
+
+    // 先在当前章节的当前位置之后搜索
+    bool found = ui->textBrowser->find(m_lastSearchText, flags);
+    if (found) {
+        highlightFoundText(ui->textBrowser->textCursor());
+        return;
+    }
+
+    // 如果当前章节没有找到，搜索后续章节
+    int originalChapter = m_currentChapter;
+
+    for (int i = 1; i < m_chapterContents.size(); i++) {
+        int chapterToSearch = (originalChapter + i) % m_chapterContents.size();
+
+        // 检查该章节内容是否包含搜索文本
+        if (m_chapterContents[chapterToSearch].contains(m_lastSearchText,
+                                                        m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+
+            // 切换到包含文本的章节
+            m_currentChapter = chapterToSearch;
+            ui->chaptersListWidget->setCurrentRow(chapterToSearch);
+            ui->textBrowser->setText(m_chapterContents.at(chapterToSearch));
+
+            // 在新章节中从头搜索
+            QTextCursor cursor = ui->textBrowser->textCursor();
+            cursor.setPosition(0);
+            ui->textBrowser->setTextCursor(cursor);
+
+            if (ui->textBrowser->find(m_lastSearchText, flags)) {
+                highlightFoundText(ui->textBrowser->textCursor());
+                return;
+            }
+        }
+    }
+
+    // 如果所有后续章节都没找到，从第一章重新开始搜索
+    if (originalChapter > 0) {
+        for (int i = 0; i < originalChapter; i++) {
+            if (m_chapterContents[i].contains(m_lastSearchText,
+                                              m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+
+                m_currentChapter = i;
+                ui->chaptersListWidget->setCurrentRow(i);
+                ui->textBrowser->setText(m_chapterContents.at(i));
+
+                QTextCursor cursor = ui->textBrowser->textCursor();
+                cursor.setPosition(0);
+                ui->textBrowser->setTextCursor(cursor);
+
+                if (ui->textBrowser->find(m_lastSearchText, flags)) {
+                    highlightFoundText(ui->textBrowser->textCursor());
+                    return;
+                }
+            }
+        }
+    }
+
+    // 如果全文都没找到更多匹配
+    QMessageBox::information(this, "查找结果", "已到达最后一个匹配项");
+}
+
+void ReadingView::findPrevious()
+{
+    if (m_lastSearchText.isEmpty()) return;
+
+    QTextDocument::FindFlags flags = QTextDocument::FindBackward;
+    if (m_lastSearchCaseSensitive) {
+        flags |= QTextDocument::FindCaseSensitively;
+    }
+
+    // 先在当前章节的当前位置之前搜索
+    bool found = ui->textBrowser->find(m_lastSearchText, flags);
+    if (found) {
+        highlightFoundText(ui->textBrowser->textCursor());
+        return;
+    }
+
+    // 如果当前章节没有找到，搜索前面的章节
+    int originalChapter = m_currentChapter;
+
+    for (int i = 1; i <= originalChapter; i++) {
+        int chapterToSearch = originalChapter - i;
+
+        // 检查该章节内容是否包含搜索文本
+        if (m_chapterContents[chapterToSearch].contains(m_lastSearchText,
+                                                        m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+
+            // 切换到包含文本的章节
+            m_currentChapter = chapterToSearch;
+            ui->chaptersListWidget->setCurrentRow(chapterToSearch);
+            ui->textBrowser->setText(m_chapterContents.at(chapterToSearch));
+
+            // 在新章节中从尾部向前搜索
+            QTextCursor cursor = ui->textBrowser->textCursor();
+            cursor.setPosition(ui->textBrowser->document()->characterCount() - 1);
+            ui->textBrowser->setTextCursor(cursor);
+
+            if (ui->textBrowser->find(m_lastSearchText, flags)) {
+                highlightFoundText(ui->textBrowser->textCursor());
+                return;
+            }
+        }
+    }
+
+    // 如果所有前面章节都没找到，从最后一章开始向前搜索
+    if (originalChapter < m_chapterContents.size() - 1) {
+        for (int i = m_chapterContents.size() - 1; i > originalChapter; i--) {
+            if (m_chapterContents[i].contains(m_lastSearchText,
+                                              m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+
+                m_currentChapter = i;
+                ui->chaptersListWidget->setCurrentRow(i);
+                ui->textBrowser->setText(m_chapterContents.at(i));
+
+                QTextCursor cursor = ui->textBrowser->textCursor();
+                cursor.setPosition(ui->textBrowser->document()->characterCount() - 1);
+                ui->textBrowser->setTextCursor(cursor);
+
+                if (ui->textBrowser->find(m_lastSearchText, flags)) {
+                    highlightFoundText(ui->textBrowser->textCursor());
+                    return;
+                }
+            }
+        }
+    }
+
+    // 如果全文都没找到更多匹配
+    QMessageBox::information(this, "查找结果", "已到达第一个匹配项");
+}
+
+void ReadingView::highlightFoundText(const QTextCursor& cursor)
+{
+    // 获取当前设置管理器
+    auto& settings = SettingsManager::instance();
+
+    // 根据主题模式设置高亮颜色
+    QColor highlightColor;
+    QColor highlightTextColor;
+
+    if (settings.isNightMode()) {
+        // 夜间模式：使用明亮的黄色高亮，深色文字，确保在深色背景下可见
+        highlightColor = QColor("#FFFF00");  // 明亮的黄色背景
+        highlightTextColor = QColor("#000000");  // 黑色文字
+    } else {
+        // 日间模式：使用深色高亮，白色文字，确保在浅色背景下可见
+        highlightColor = QColor("#FF4500");  // 橙红色背景
+        highlightTextColor = QColor("#FFFFFF");  // 白色文字
+    }
+
+    // 设置选中文本的格式
+    QTextCharFormat format;
+    format.setBackground(highlightColor);
+    format.setForeground(highlightTextColor);
+
+    // 创建一个新的光标来设置格式
+    QTextCursor highlightCursor = cursor;
+    highlightCursor.mergeCharFormat(format);
+
+    // 确保找到的文本可见
+    ui->textBrowser->ensureCursorVisible();
+
+    // 更新当前位置
+    m_currentPosition = ui->textBrowser->verticalScrollBar()->value();
+}
+
+// 翻页功能
+void ReadingView::nextPage()
+{
+    QScrollBar* scrollBar = ui->textBrowser->verticalScrollBar();
+    int currentValue = scrollBar->value();
+    int pageStep = scrollBar->pageStep();
+
+    // 如果已经到达当前章节底部，切换到下一章
+    if (currentValue + pageStep >= scrollBar->maximum()) {
+        if (m_currentChapter < m_chapterContents.size() - 1) {
+            m_currentChapter++;
+            ui->chaptersListWidget->setCurrentRow(m_currentChapter);
+            ui->textBrowser->setText(m_chapterContents.at(m_currentChapter));
+            scrollBar->setValue(0); // 从新章节顶部开始
+        }
+    } else {
+        // 否则向下滚动一页
+        scrollBar->setValue(currentValue + pageStep);
+    }
+
+    // 更新当前位置
+    m_currentPosition = scrollBar->value();
+}
+
+void ReadingView::previousPage()
+{
+    QScrollBar* scrollBar = ui->textBrowser->verticalScrollBar();
+    int currentValue = scrollBar->value();
+    int pageStep = scrollBar->pageStep();
+
+    // 如果已经到达当前章节顶部，切换到上一章
+    if (currentValue <= 0) {
+        if (m_currentChapter > 0) {
+            m_currentChapter--;
+            ui->chaptersListWidget->setCurrentRow(m_currentChapter);
+            ui->textBrowser->setText(m_chapterContents.at(m_currentChapter));
+            scrollBar->setValue(scrollBar->maximum()); // 从上一章节底部开始
+        }
+    } else {
+        // 否则向上滚动一页
+        scrollBar->setValue(qMax(0, currentValue - pageStep));
+    }
+
+    // 更新当前位置
+    m_currentPosition = scrollBar->value();
 }

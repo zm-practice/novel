@@ -76,26 +76,50 @@ void DictionaryService::loadChineseDictionary()
 void DictionaryService::query(const QString &text)
 {
     QString trimmedText = text.trimmed();
-    if (trimmedText.isEmpty()) return;
+    qDebug() << "DictionaryService::query 被调用，查询内容:" << trimmedText;
 
+    if (trimmedText.isEmpty()) {
+        qDebug() << "查询内容为空";
+        return;
+    }
+
+    // ★★★ 改进：更准确的中文判断 ★★★
     QChar firstChar = trimmedText.at(0);
-    // 修正: 0x9fa5 是旧标准，用 isLetter() 和 script() 更准确
-    if (firstChar.isLetter() && firstChar.script() == QChar::Script_Han)
+    bool isChinese = (firstChar.unicode() >= 0x4E00 && firstChar.unicode() <= 0x9FFF);
+
+    qDebug() << "第一个字符:" << firstChar
+             << "Unicode:" << QString::number(firstChar.unicode(), 16)
+             << "是否为中文:" << isChinese;
+
+    if (isChinese)
     {
+        qDebug() << "使用本地词典查询中文";
+        qDebug() << "字典大小:" << m_chineseDict.size();
+
         WordDefinition result;
         if (queryChineseLocally(trimmedText, result)) {
+            qDebug() << "本地查询成功:" << result.displayWord << result.phonetic;
             emit querySuccess(result);
         } else {
-            emit queryError("在本地词典中找不到该字/词");
+            qDebug() << "本地词典中未找到:" << trimmedText;
+
+            // ★★★ 改进：提供更详细的错误信息 ★★★
+            QString errorMsg = QString("在本地词典中找不到'%1'").arg(trimmedText);
+            if (m_chineseDict.isEmpty()) {
+                errorMsg += "\n(词典未加载或为空)";
+            }
+            emit queryError(errorMsg);
         }
     }
     else
     {
+        qDebug() << "使用在线API查询英文";
         QUrl url("https://api.dictionaryapi.dev/api/v2/entries/en/" + trimmedText);
         QNetworkRequest request(url);
         m_networkManager->get(request);
     }
 }
+
 
 // ★★★ 同时，我们需要修改中文查询函数，因为它现在没有释义了 ★★★
 bool DictionaryService::queryChineseLocally(const QString& character, WordDefinition &result)
