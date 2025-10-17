@@ -22,10 +22,44 @@ SideNavigationView::SideNavigationView(QWidget *parent) :
 
     // 设置默认显示的页面
     ui->contentStackedWidget->setCurrentWidget(ui->bookshelfPage);
- //connect(ui->bookListWidget, &QListWidget::itemDoubleClicked, this, &SideNavigationView::on_bookListWidget_itemDoubleClicked);
-    // 内部导航按钮的连接，因为命名规范，setupUi 会自动完成
-    // connect(ui->bookshelfButton, ...);
-    // connect(ui->myProfileButton, ...);
+
+
+    // 创建悬浮时钟按钮
+
+    ui->timerButton->setToolTip("打开悬浮时钟窗口");
+    ui->timerButton->setFixedSize(80, 30); // 设置固定大小
+    ui->timerButton->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 4px; }");
+
+
+    // 连接按钮的clicked信号到showTimerWindow槽
+    connect(ui->timerButton, &QPushButton::clicked, this, &SideNavigationView::showTimerWindow);
+
+
+}
+//time
+void SideNavigationView::showTimerWindow()
+{
+    // 创建新窗口
+    m_timerWindow = new TimerWindow(nullptr); // 使用nullptr而不是this，避免父窗口影响
+    m_timerWindow->setAttribute(Qt::WA_DeleteOnClose); // 关闭时自动删除
+
+    // 设置窗口标志
+    m_timerWindow->setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+
+    // 显示窗口
+    m_timerWindow->show();
+
+    // 计算并设置位置
+    const int MARGIN = 20;
+    QScreen *screen = QGuiApplication::primaryScreen();
+    QRect screenGeometry = screen->availableGeometry();
+    int x = screenGeometry.width() - m_timerWindow->width() - MARGIN;
+    int y = screenGeometry.height() - m_timerWindow->height() - MARGIN;
+    m_timerWindow->move(x, y);
+
+    // 确保窗口在前台显示
+    m_timerWindow->raise();
+    m_timerWindow->activateWindow();
 }
 
 SideNavigationView::~SideNavigationView()

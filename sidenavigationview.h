@@ -1,6 +1,7 @@
 #ifndef SIDENAVIGATIONVIEW_H
 #define SIDENAVIGATIONVIEW_H
-
+//时钟
+#include "timerwindow.h"//***新加***
 #include <QWidget>
 #include <QListWidgetItem>
 // 前向声明 BookManager，避免在头文件中引入完整的类定义，
@@ -44,12 +45,18 @@ private slots:
     // 响应导航栏的“我的”按钮点击
     void on_myProfileButton_clicked();
     void on_bookListWidget_itemDoubleClicked(QListWidgetItem *item);
+
+    //时钟
+    void showTimerWindow();//***新加***
 private:
     // 指向UI类的指针
     Ui::SideNavigationView *ui;
 
     // 持有一个指向 BookManager 对象的指针，以便调用其功能
     BookManager *m_bookManager = nullptr;
+
+    //time
+    TimerWindow *m_timerWindow = nullptr;//***新加***
 };
 
 #endif // SIDENAVIGATIONVIEW_H
