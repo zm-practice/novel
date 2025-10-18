@@ -1,0 +1,99 @@
+/* ---------------------------------------------------------------------------
+ * 全局通用样式 (Global Styles) - V5 最终修正版
+ * --------------------------------------------------------------------------- */
+* {
+    font-family: "Microsoft YaHei", "SimSun";
+    font-size: 14px;
+}
+
+/* 整体背景色 (保持不变) */
+QWidget, QMainWindow, QDialog {
+    background-color: #DCDCDC;
+}
+
+/* ---------------------------------------------------------------------------
+ * 【核心修正】统一设置所有控件的默认文本颜色
+ * --------------------------------------------------------------------------- */
+/* 为所有基础控件设置一个清晰的深灰色文本，彻底解决白字问题 */
+QWidget, QLabel, QMenuBar, QStatusBar, QSpinBox, QComboBox, QDialogButtonBox {
+    color: #212121; /* 非常深的灰色，近乎黑色，确保高对比度 */
+}
+
+/* ---------------------------------------------------------------------------
+ * 通用控件样式 (Refined Widget Styles)
+ * --------------------------------------------------------------------------- */
+/* 按钮通用样式 */
+QPushButton, QToolButton {
+    background-color: #AEC6CF;
+    color: #212121; /* 【统一】将按钮文字颜色也设为标准深灰色 */
+    border: 1px solid #9FB7BF;
+    border-radius: 8px;
+    padding: 6px 12px;
+}
+QPushButton:hover, QToolButton:hover { background-color: #BBD1D9; }
+QPushButton:pressed, QToolButton:pressed { background-color: #9FB7BF; }
+
+/* 对于“选中”状态的按钮，背景变深，文字变白以保持对比度 */
+QPushButton:checked {
+    background-color: #778A91;
+    color: white;
+}
+
+/* 输入框 */
+QLineEdit {
+    background-color: #FFFFFF;
+    border: 1px solid #CFD8DC;
+    border-radius: 8px;
+    padding: 6px;
+    color: #37474F;
+}
+QLineEdit:focus { border: 1px solid #AEC6CF; }
+
+/* 列表和文本区域 */
+QListWidget, QTextBrowser {
+    border-radius: 8px;
+    border: 1px solid #CFD8DC;
+    color: #212121; /* 【新增】确保列表和文本区也有默认深色文字 */
+}
+
+/* 列表项的特殊状态 */
+QListWidget::item:selected {
+    background-color: #AEC6CF;
+    color: #FFFFFF; /* 选中时文字变白 */
+}
+
+/* 菜单样式 */
+QMenu {
+    background-color: #FCFCFC;
+    border: 1px solid #D0D0D0;
+    border-radius: 5px;
+    padding: 5px;
+    color: #212121; /* 【统一】菜单内的文字也是标准深灰色 */
+}
+QMenu::item {
+    padding: 8px 25px;
+    border-radius: 4px;
+}
+QMenu::item:selected {
+    background-color: #AEC6CF;
+    color: #FFFFFF; /* 选中时文字变白 */
+}
+QMenu::separator {
+    height: 1px;
+    background: #E0E0E0;
+    margin: 5px 0px;
+}
+
+/* 菜单栏的特殊状态 */
+QMenuBar::item:selected {
+    background-color: #AEC6CF;
+    color: #FFFFFF; /* 选中时文字变白 */
+}
+
+/* 特殊样式 (保持不变) */
+SideNavigationView #bookshelfButton, SideNavigationView #myProfileButton {
+    background-color: transparent; border: none;
+}
+SideNavigationView #bookshelfButton:checked, SideNavigationView #myProfileButton:checked {
+    background-color: #AEC6CF; color: white; border-radius: 5px;
+}

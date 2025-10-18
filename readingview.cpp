@@ -37,6 +37,7 @@
 //听书
 #include "ttsplayer.h"
 //#include <QTextToSpeech>
+#include <QAudioOutput>  // ✅ Qt 6 必须包含这个头文件!
 #include <QtNetwork>
 #include <QRegularExpression>
 #include <QMediaPlayer>
@@ -45,6 +46,10 @@
 
 #include "keyworddialog.h"
 #include "ConfigManager.h"
+#include <utility>  // for std::as_const
+
+#include <QFileDialog>
+// readingview.cpp
 
 ReadingView::ReadingView(QWidget *parent) :
     QWidget(parent),
@@ -52,155 +57,167 @@ ReadingView::ReadingView(QWidget *parent) :
     m_currentChapter(0),
     m_currentPosition(0),
     m_lastSearchCaseSensitive(false),
-    m_chapterListVisible(true) // 默认显示章节列表
+    m_chapterListVisible(true)
 {
     ui->setupUi(this);
+    auto& settings = SettingsManager::instance();
 
-    // 全局设置连接
-    connect(&SettingsManager::instance(), &SettingsManager::settingsChanged, this, &ReadingView::applySettings);
+    // ===================================================================
+    // 1. 将所有设置更改的信号，统一连接到一个槽函数来更新UI
+    //    【核心修正】使用正确的信号名 `settingsChanged` 并只连接一次！
+    // ===================================================================
+    connect(&settings, &SettingsManager::settingsChanged, this, [this]() {
+        // 当任何设置改变时，这个 lambda 会被调用
 
-    // 书签右键菜单连接
+        // (A) 调用 applySettings 来更新颜色、字体、背景等
+        applySettings();
+
+        // (B) 更新那些 applySettings 不负责的UI元素，比如按钮文本
+        if (SettingsManager::instance().isNightMode()) {
+            ui->nightModeButton->setText("日间模式");
+        } else {
+            ui->nightModeButton->setText("夜间模式");
+        }
+        // (C) 同步控件的状态
+        ui->nightModeButton->setChecked(SettingsManager::instance().isNightMode());
+        ui->fontComboBox->setCurrentFont(QFont(SettingsManager::instance().fontFamily()));
+        ui->fontSizeSpinBox->setValue(SettingsManager::instance().fontSize());
+    });
+
+
+    // ===================================================================
+    // 2. 连接UI控件的信号，来修改全局设置 (SettingsManager)
+    // ===================================================================
+    // 字体变化 -> 修改设置
+    connect(ui->fontComboBox, &QFontComboBox::currentFontChanged, this, [&](const QFont& font){
+        settings.setFontFamily(font.family());
+    });
+
+    // 字号变化 -> 修改设置
+    connect(ui->fontSizeSpinBox, &QSpinBox::valueChanged, this, [&](int size){
+        settings.setFontSize(size);
+    });
+
+    // 夜间模式切换 -> 修改设置
+    connect(ui->nightModeButton, &QPushButton::toggled, this, [&](bool checked){
+        settings.setNightMode(checked);
+    });
+
+    // 背景选择菜单
+    QMenu *backgroundMenu = new QMenu(this);
+    backgroundMenu->addAction(ui->actionDefault);
+    backgroundMenu->addAction(ui->actionPaperYellow);
+    backgroundMenu->addAction(ui->actionGreenBean);
+    backgroundMenu->addSeparator();
+    backgroundMenu->addAction(ui->actionCustomImage);
+    ui->backgroundButton->setMenu(backgroundMenu);
+    ui->backgroundButton->setPopupMode(QToolButton::InstantPopup);
+
+    connect(ui->actionDefault, &QAction::triggered, this, [&](){ settings.setBackgroundMode(SettingsManager::Default); });
+    connect(ui->actionPaperYellow, &QAction::triggered, this, [&](){ settings.setBackgroundMode(SettingsManager::PaperYellow); });
+    connect(ui->actionGreenBean, &QAction::triggered, this, [&](){ settings.setBackgroundMode(SettingsManager::GreenBean); });
+    connect(ui->actionCustomImage, &QAction::triggered, this, [&](){
+        QString imagePath = QFileDialog::getOpenFileName(this, "选择背景图片", "", "Image Files (*.png *.jpg *.jpeg)");
+        if (!imagePath.isEmpty()) {
+            settings.setCustomImagePath(imagePath);
+            settings.setBackgroundMode(SettingsManager::CustomImage);
+        }
+    });
+
+    // ===================================================================
+    // 3. 连接其他功能的信号和槽 (保持不变)
+    // ===================================================================
+    // 右键菜单
     ui->textBrowser->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui->textBrowser, &QTextBrowser::customContextMenuRequested, this, &ReadingView::showContextMenu);
 
-    // 自动阅读定时器
+    // 自动滚动
     m_autoScrollTimer = new QTimer(this);
     connect(m_autoScrollTimer, &QTimer::timeout, this, &ReadingView::onAutoScrollTimerTimeout);
-
-    // // 查词服务
-    // m_dictionaryService = new DictionaryService(this);
-    // connect(m_dictionaryService, &DictionaryService::querySuccess, this, &ReadingView::onQuerySuccess);
-    // connect(m_dictionaryService, &DictionaryService::queryError, this, &ReadingView::onQueryError);
-
-
-    // ★★★ 关键修复1: 在构造函数中创建 TooltipPopup ★★★
-    m_tooltipPopup = new TooltipPopup(this);
-
-    // ★★★ 关键修复2: 创建查词服务并连接信号 ★★★
-    m_dictionaryService = new DictionaryService(this);
-    connect(m_dictionaryService, &DictionaryService::querySuccess,
-            this, &ReadingView::onQuerySuccess);
-    connect(m_dictionaryService, &DictionaryService::queryError,
-            this, &ReadingView::onQueryError);
-
-    // ★★★ 关键修复3: 为 QTextBrowser 安装事件过滤器 ★★★
-    ui->textBrowser->viewport()->installEventFilter(this);
-    // 初始化UI
-    auto& settings = SettingsManager::instance();
     ui->speedSlider->setRange(10, 500);
     ui->speedSlider->setInvertedAppearance(true);
     ui->speedSlider->setValue(settings.autoScrollSpeed());
     setAutoScrollSpeed(settings.autoScrollSpeed());
-    applySettings();
 
-    // 初始化书签格式
-    m_bookmarkFormat.setBackground(QColor(255, 255, 0, 50));
-    m_bookmarkFormat.setUnderlineStyle(QTextCharFormat::DashUnderline);
-    m_bookmarkFormat.setUnderlineColor(Qt::gray);
+    // 在线查词
+    m_tooltipPopup = new TooltipPopup(this);
+    m_dictionaryService = new DictionaryService(this);
+    connect(m_dictionaryService, &DictionaryService::querySuccess, this, &ReadingView::onQuerySuccess);
+    connect(m_dictionaryService, &DictionaryService::queryError, this, &ReadingView::onQueryError);
+    ui->textBrowser->viewport()->installEventFilter(this);
 
-    // 连接UI中的上一页/下一页按钮
+    // 关键词高亮
+    m_highlighter = new KeyWordHighlighter(ui->textBrowser, this);
+    connect(&KeywordManager::instance(), &KeywordManager::rulesChanged, m_highlighter, &KeyWordHighlighter::highlight);
+
+    // 听书功能
+    m_networkManager = new QNetworkAccessManager(this);
+    m_player = new QMediaPlayer(this);
+    m_audioOutput = new QAudioOutput(this);
+    m_player->setAudioOutput(m_audioOutput);
+    m_audioOutput->setVolume(1.0);
+    connect(m_player, &QMediaPlayer::playbackStateChanged, this, &ReadingView::onPlayerStateChanged);
+    connect(m_player, &QMediaPlayer::errorOccurred, this, &ReadingView::onPlayerError);
+
+    m_ttsPlayer = new TtsPlayer(this);
+    m_ttsPlayer->hide();
+    connect(m_ttsPlayer, &TtsPlayer::playRequested, this, &ReadingView::onPlayerPlayRequested);
+    connect(m_ttsPlayer, &TtsPlayer::pauseRequested, this, &ReadingView::onPlayerPauseRequested);
+    connect(m_ttsPlayer, &TtsPlayer::resumeRequested, this, &ReadingView::onPlayerResumeRequested);
+    connect(m_ttsPlayer, &TtsPlayer::stopRequested, this, &ReadingView::onPlayerStopRequested);
+    connect(m_ttsPlayer, &TtsPlayer::sentenceChangeRequested, this, &ReadingView::onPlayerSentenceChangeRequested);
+    connect(m_ttsPlayer, &TtsPlayer::closed, this, &ReadingView::onPlayerStopRequested);
+    connect(ui->listenButton, &QPushButton::clicked, this, &ReadingView::onListenButtonClicked);
+
+    // Token管理
+    m_tokenRefreshTimer = new QTimer(this);
+    connect(m_tokenRefreshTimer, &QTimer::timeout, this, &ReadingView::fetchAccessToken);
+    m_tokenRefreshTimer->start(24 * 60 * 60 * 1000);
+    fetchAccessToken();
+
+    // 自动保存
+    m_autoSaveTimer = new QTimer(this);
+    connect(m_autoSaveTimer, &QTimer::timeout, this, &ReadingView::saveProgress);
+    m_autoSaveTimer->start(30000);
+
+    // 翻页按钮
     connect(ui->prevPageButton, &QPushButton::clicked, this, &ReadingView::previousPage);
     connect(ui->nextPageButton, &QPushButton::clicked, this, &ReadingView::nextPage);
 
-    // 创建搜索控件
-    m_searchLineEdit = new QLineEdit(this);
-    m_searchLineEdit->setPlaceholderText("搜索内容...");
-    m_searchLineEdit->setFixedWidth(200);
+    // 搜索功能
+    connect(ui->searchButton, &QPushButton::clicked, this, [this](){ findText(ui->searchLineEdit->text(), false); });
+    connect(ui->searchNextButton, &QPushButton::clicked, this, &ReadingView::findNext);
+    connect(ui->searchPrevButton, &QPushButton::clicked, this, &ReadingView::findPrevious);
+    connect(ui->searchLineEdit, &QLineEdit::returnPressed, this, [this](){ findText(ui->searchLineEdit->text(), false); });
 
-    m_searchButton = new QPushButton("搜索", this);
-    connect(m_searchButton, &QPushButton::clicked, this, [this]() {
-        findText(m_searchLineEdit->text(), false);
-   });
-    // //听书播放器
-    //     // 1. 监听播放器的请求
-    //     connect(m_ttsPlayer, &TtsPlayer::playRequested, this, &ReadingView::onSpeak);
-    //     connect(m_ttsPlayer, &TtsPlayer::pauseRequested, m_tts, &QTextToSpeech::pause);
-    //     connect(m_ttsPlayer, &TtsPlayer::resumeRequested, m_tts, &QTextToSpeech::resume);
-    //     connect(m_ttsPlayer, &TtsPlayer::stopRequested, this, &ReadingView::onStop);
-    //     connect(m_ttsPlayer, &TtsPlayer::sentenceChangeRequested, this, &ReadingView::onSpeak);
-
-    //     // 2. 监听TTS引擎的状态变化，以更新播放器UI
-    //     connect(m_tts, &QTextToSpeech::stateChanged, this, &ReadingView::onTtsStateChanged);
-
-    //     // 3. 监听播放器关闭事件
-    //     connect(m_ttsPlayer, &TtsPlayer::closed, this, &ReadingView::onStop);
-
-        // --- 新增：连接“听书”按钮 ---
-        connect(ui->listenButton, &QPushButton::clicked, this, &ReadingView::onListenButtonClicked);
-        // --- 初始化网络和播放器 ---
-        m_networkManager = new QNetworkAccessManager(this);
-        m_player = new QMediaPlayer(this);
-
-        // --- 初始化播放器 UI ---
-        m_ttsPlayer = new TtsPlayer(this);
-        m_ttsPlayer->hide();
-
-        // --- 连接 TtsPlayer 的信号 ---
-        connect(m_ttsPlayer, &TtsPlayer::playRequested, this, &ReadingView::onPlayerPlayRequested);
-        connect(m_ttsPlayer, &TtsPlayer::pauseRequested, this, &ReadingView::onPlayerPauseRequested);
-        connect(m_ttsPlayer, &TtsPlayer::resumeRequested, this, &ReadingView::onPlayerResumeRequested);
-        connect(m_ttsPlayer, &TtsPlayer::stopRequested, this, &ReadingView::onPlayerStopRequested);
-        connect(m_ttsPlayer, &TtsPlayer::sentenceChangeRequested, this, &ReadingView::onPlayerSentenceChangeRequested);
-        connect(m_ttsPlayer, &TtsPlayer::closed, this, &ReadingView::onPlayerStopRequested); // 当播放器关闭时也停止播放
-
-        // --- 连接播放器的状态变化 ---
-        connect(m_player, &QMediaPlayer::playbackStateChanged, this, &ReadingView::onPlayerStateChanged);
-
-        // --- 启动时先获取一次 Access Token ---
-        fetchAccessToken();
-
-        // 构造函数中
-        connect(m_player, &QMediaPlayer::errorOccurred, this, &ReadingView::onPlayerError);
-
-
-
-
-    m_searchNextButton = new QPushButton("下一个", this);
-    connect(m_searchNextButton, &QPushButton::clicked, this, &ReadingView::findNext);
-
-    m_searchPrevButton = new QPushButton("上一个", this);
-    connect(m_searchPrevButton, &QPushButton::clicked, this, &ReadingView::findPrevious);
-
-
-
+    // 其他按钮
     connect(ui->noteButton, &QPushButton::clicked, this, &ReadingView::notepad);
-
-
     connect(ui->keyButton, &QPushButton::clicked, this, &ReadingView::showKeyword);
 
-    // // 创建章节切换按钮
-    // m_toggleChapterButton = new QPushButton("隐藏章节", this);
-    // connect(m_toggleChapterButton, &QPushButton::clicked, this, &ReadingView::toggleChapterList);
 
-    // 将搜索控件添加到布局中
-    QHBoxLayout* searchLayout = new QHBoxLayout();
-    searchLayout->addWidget(m_searchLineEdit);
-    searchLayout->addWidget(m_searchButton);
-    searchLayout->addWidget(m_searchNextButton);
-    searchLayout->addWidget(m_searchPrevButton);
-    searchLayout->addStretch();
-    //searchLayout->addWidget(m_toggleChapterButton);
-
-    // 将搜索布局添加到界面上方
-    QVBoxLayout* mainLayout = qobject_cast<QVBoxLayout*>(layout());
-    if (mainLayout) {
-        mainLayout->insertLayout(0, searchLayout);
-    }
-
-    // 设置章节列表宽度更窄
-    ui->chaptersListWidget->setMaximumWidth(150);
-    applySettings();
+    // ===================================================================
+    // 4. 初始化UI状态
+    //    在所有连接都设置好之后，手动发一个信号来确保UI是最新状态
+    // ===================================================================
+    emit settings.settingsChanged(); // 触发一次信号，让上面的 connect 生效，从而初始化所有UI
 }
-
+// 2. 修复析构函数 - 添加保存进度 ✅
 ReadingView::~ReadingView()
 {
+    saveProgress(); // 关闭时保存进度 ✅
+
+    // // 清理音频buffer
+    // if (m_currentAudioBuffer) {
+    //     m_currentAudioBuffer->deleteLater();
+    //     m_currentAudioBuffer = nullptr;
+    // }
+
     delete ui;
 }
-
-void ReadingView::onPlayerError(QMediaPlayer::Error error, const QString &errorString)
-{
-    qDebug() << "QMediaPlayer Error:" << error << errorString;
-}
+// void ReadingView::onPlayerError(QMediaPlayer::Error error, const QString &errorString)
+// {
+//     qDebug() << "QMediaPlayer Error:" << error << errorString;
+// }
 
 
 // ★★★ 关键修复4: 使用事件过滤器捕获双击事件 ★★★
@@ -354,15 +371,14 @@ void ReadingView::on_speedSlider_valueChanged(int value)
 //上面截至到
 
 
+// 3. 修复loadBook - 添加恢复进度 ✅
 void ReadingView::loadBook(const BookInfo &book)
 {
-    //书签！！！
-    m_currentBook = book; // ★★★ 记下当前的书籍 ★★★
-
-    // 确保书籍有唯一ID，如果没有则使用文件路径作为ID
+    m_currentBook = book;
     if (m_currentBook.id.isEmpty()) {
         m_currentBook.id = m_currentBook.filePath;
     }
+
     QFile file(book.filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         ui->textBrowser->setText("错误：无法打开文件 " + book.filePath);
@@ -370,16 +386,21 @@ void ReadingView::loadBook(const BookInfo &book)
     }
 
     QTextStream in(&file);
-    // 在 Qt 6 中，QTextStream 默认使用 UTF-8，不再需要 setCodec
-
     QString content = in.readAll();
     file.close();
 
     parseChapters(content);
 
-    QApplication::processEvents();//!!!
-}
+    // ✅ 恢复上次阅读进度
+    double lastPage = ConfigManager::instance().lastPage(m_currentBook.filePath);
+    if (lastPage > 0) {
+        QTimer::singleShot(100, this, [this, lastPage]() {
+            ui->textBrowser->verticalScrollBar()->setValue(static_cast<int>(lastPage));
+        });
+    }
 
+    QApplication::processEvents();
+}
 
 void ReadingView::parseChapters(const QString &content)
 {
@@ -429,88 +450,197 @@ void ReadingView::setBookManager(BookManager *manager)
 
 
 
-void ReadingView::on_chaptersListWidget_itemClicked(QListWidgetItem *item)
-{
-    if (!item) return;
-    int index = ui->chaptersListWidget->row(item);
-    if (index >= 0 && index < m_chapterContents.size()) {
-        m_currentChapterIndex = index;
-        ui->textBrowser->setText(m_chapterContents.at(index));
-        applyBookmarksToChapter(index);
+    // 4. 修复章节切换 - 添加保存进度和关键词高亮 ✅
+    void ReadingView::on_chaptersListWidget_itemClicked(QListWidgetItem *item)
+    {
+        if (!item) return;
 
-        // --- 新增：检查文本是否为空，并据此设置按钮状态 ---
-        bool hasText = !ui->textBrowser->toPlainText().isEmpty();
-        ui->listenButton->setEnabled(hasText);
+        // 先保存当前进度 ✅
+        saveProgress();
+
+        int index = ui->chaptersListWidget->row(item);
+        if (index >= 0 && index < m_chapterContents.size()) {
+            m_currentChapterIndex = index;
+            ui->textBrowser->setText(m_chapterContents.at(index));
+            applyBookmarksToChapter(index);
+
+            // 应用关键词高亮 ✅
+            if (m_highlighter) {
+                m_highlighter->highlight();
+            }
+
+            bool hasText = !ui->textBrowser->toPlainText().isEmpty();
+            ui->listenButton->setEnabled(hasText);
+        }
     }
-}
 
 // readingview.cpp
 
-void ReadingView::applySettings()
-{
-    // 获取全局设置的单例对象
-    auto& settings = SettingsManager::instance();
+//     void ReadingView::applySettings()
+//     {
+//         // 获取全局设置的单例对象
+//         auto& settings = SettingsManager::instance();
 
-    // 1. --- 设置字体 ---
-    // 创建一个 QFont 对象，并从 SettingsManager 获取字体家族和大小
-    QFont font(settings.fontFamily());
-    font.setPointSize(settings.fontSize());
+//         // // 1. --- 设置字体 ---
+//         // // 创建一个 QFont 对象，并从 SettingsManager 获取字体家族和大小
+//         // QFont font(settings.fontFamily());
+//         // font.setPointSize(settings.fontSize());
 
-    // 将这个字体同时应用到正文显示区和章节列表
-    ui->textBrowser->setFont(font);
-    ui->chaptersListWidget->setFont(font);
+//         // // 将这个字体同时应用到正文显示区和章节列表
+//         // ui->textBrowser->setFont(font);
+//         // ui->chaptersListWidget->setFont(font);
 
-    // 2. --- 设置背景和前景颜色 ---
-    QString browserStyle, listStyle;
+//         // 2. --- 设置背景和前景颜色 ---
+//         QString browserStyle, listStyle;
 
-    // 判断当前是否是自定义图片背景模式
-    if (settings.backgroundMode() == SettingsManager::CustomImage && !settings.customImagePath().isEmpty())
+//         // 判断当前是否是自定义图片背景模式
+//         if (settings.backgroundMode() == SettingsManager::CustomImage && !settings.customImagePath().isEmpty())
+//         {
+//             // --- 图片背景模式 ---
+//             QString imagePath = settings.customImagePath();
+//             imagePath.replace("\\", "/"); // 确保路径格式正确
+
+//             // 为 QTextBrowser 准备样式表
+//             browserStyle = QString(
+//                                "QTextBrowser {"
+//                                "  border-image: url(%1) 0 0 0 0 stretch stretch;" // 设置背景图片
+//                                "  background-color: transparent;"              // 背景色必须设为透明
+//                                "  color: %2;"                                   // 从全局设置获取文字颜色
+//                                "  border: none;"
+//                                "  font-family: '%3';"         // 【新增】字体家族
+//                                "  font-size: %4pt;"           // 【新增】字体大小 (注意单位是 pt)                               // 去掉边框
+//                                "}"
+//                                ).arg(imagePath)
+//                                .arg(settings.textColor().name())
+//                                .arg(settings.fontFamily())       // 【新增】传入字体家族参数
+//                                .arg(settings.fontSize());       // 【新增】传入字体大小参数;
+
+//             // 为 QListWidget 准备样式表
+//             listStyle = QString(
+//                             "QListWidget {"
+//                             "  border-image: url(%1) 0 0 0 0 stretch stretch;"
+//                             "  background-color: transparent;"
+//                             "  color: %2;"
+//                             "  border: none;"
+//                             "  font-family: '%3';"             // 【新增】
+//                             "  font-size: %4pt;"
+//                             "}"
+//                             // 保持选中项的高亮样式
+//                             "QListWidget::item:selected { background-color: #4a6984; color: white; }"
+//                             ).arg(imagePath)
+//                             .arg(settings.textColor().name())
+//                             .arg(settings.fontFamily())           // 【新增】
+//                             .arg(settings.fontSize()); ;
+//         }
+//         else
+//         {
+//             // --- 纯色背景模式 ---
+//             // 为 QTextBrowser 准备样式表
+//             browserStyle = QString(
+//                                "QTextBrowser { "
+//                                "background-color: %1;"
+//                                 " color: %2;"
+//                                 "border: none; "
+//                                 "font-family: '%3';"         // 【新增】
+//                            "  font-size: %4pt;"           // 【新增】
+//                                "}")
+//                                .arg(settings.backgroundColor().name(QColor::HexRgb))
+//                                .arg(settings.textColor().name(QColor::HexRgb))
+//                                 .arg(settings.fontFamily())       // 【新增】
+//                                 .arg(settings.fontSize());       // 【新增】
+
+//             // 为 QListWidget 准备样式表
+//             listStyle = QString(
+//                             "QListWidget  {"
+//                         "  background-color: %1;"
+//                         "  color: %2;"
+//                         "  border: none;"
+//                         "  font-family: '%3';"             // 【新增】
+//                         "  font-size: %4pt;"               // 【新增】
+//                         "}"
+//                             "QListWidget::item:selected { background-color: #4a6984; color: white; }"
+//                             ).arg(settings.backgroundColor().name(QColor::HexRgb))
+//                             .arg(settings.textColor().name(QColor::HexRgb))
+//                             .arg(settings.fontFamily())           // 【新增】
+//                             .arg(settings.fontSize());           // 【新增】;
+//         }
+
+//         // 3. --- 将生成的样式表应用到控件 ---
+//         ui->textBrowser->setStyleSheet(browserStyle);
+//     ui->chaptersListWidget->setStyleSheet(listStyle);
+// }
+
+    // readingview.cpp 中
+
+    void ReadingView::applySettings()
     {
-        // --- 图片背景模式 ---
-        QString imagePath = settings.customImagePath();
-        imagePath.replace("\\", "/"); // 确保路径格式正确
+        auto& settings = SettingsManager::instance();
 
-        // 为 QTextBrowser 准备样式表
-        browserStyle = QString(
-                           "QTextBrowser {"
-                           "  border-image: url(%1) 0 0 0 0 stretch stretch;" // 设置背景图片
-                           "  background-color: transparent;"              // 背景色必须设为透明
-                           "  color: %2;"                                   // 从全局设置获取文字颜色
-                           "  border: none;"                                // 去掉边框
-                           "}"
-                           ).arg(imagePath).arg(settings.textColor().name());
+        // --- 步骤 1: 优先处理自定义图片背景 ---
+        if (settings.backgroundMode() == SettingsManager::CustomImage && !settings.customImagePath().isEmpty())
+        {
+            QString imagePath = settings.customImagePath().replace("\\", "/");
+            QString imageStyle = QString(
+                                     "border-image: url(%1) 0 0 0 0 stretch stretch;"
+                                     "background-color: transparent;"
+                                     "color: %2;" // 自定义图片模式下的文字颜色，也可以从settings里读取
+                                     "border: none;"
+                                     "font-family: '%3';"
+                                     "font-size: %4pt;"
+                                     ).arg(imagePath)
+                                     .arg(settings.textColor().name()) // 建议为自定义图片模式也设置一个文字颜色
+                                     .arg(settings.fontFamily())
+                                     .arg(settings.fontSize());
 
-        // 为 QListWidget 准备样式表
-        listStyle = QString(
-                        "QListWidget {"
-                        "  border-image: url(%1) 0 0 0 0 stretch stretch;"
-                        "  background-color: transparent;"
-                        "  color: %2;"
-                        "  border: none;"
-                        "}"
-                        // 保持选中项的高亮样式
-                        "QListWidget::item:selected { background-color: #4a6984; color: white; }"
-                        ).arg(imagePath).arg(settings.textColor().name());
+            ui->textBrowser->setStyleSheet(imageStyle);
+            ui->chaptersListWidget->setStyleSheet(imageStyle);
+            return; // 处理完毕，直接返回
+        }
+
+        // --- 步骤 2: 如果不是图片背景，则根据模式设置颜色 ---
+        QString bgColor, textColor;
+        QString fontFamily = settings.fontFamily();
+        int fontSize = settings.fontSize();
+
+        // 【核心逻辑修正】
+        if (settings.isNightMode()) {
+            // 夜间模式拥有最高优先级
+            bgColor = "#2C3E50";   // 深邃炭黑蓝
+            textColor = "#BDC3C7"; // 柔和浅灰
+        } else {
+            // 如果是日间模式，则根据选择的具体背景来决定颜色
+            switch (settings.backgroundMode()) {
+            case SettingsManager::PaperYellow:
+                bgColor = "#F5F5DC";   // 米黄
+                textColor = "#5B4636"; // 搭配的深棕色文字，更护眼
+                break;
+            case SettingsManager::GreenBean:
+                bgColor = "#C7EDCC";   // 豆绿
+                textColor = "#3E5841"; // 搭配的深绿色文字
+                break;
+            case SettingsManager::Default:
+            default: // 默认情况
+                bgColor = "#FFFFFF";   // 默认使用纯白背景
+                textColor = "#333333"; // 标准深灰色文字
+                break;
+            }
+        }
+
+        // --- 步骤 3: 构建最终的QSS样式并应用 ---
+        QString style = QString(
+                            "background-color: %1;"
+                            "color: %2;"
+                            "border: none;" // 去掉全局QSS的边框，让阅读区更沉浸
+                            "font-family: '%3';"
+                            "font-size: %4pt;"
+                            ).arg(bgColor)
+                            .arg(textColor)
+                            .arg(fontFamily)
+                            .arg(fontSize);
+
+        ui->textBrowser->setStyleSheet(style);
+        ui->chaptersListWidget->setStyleSheet(style);
     }
-    else
-    {
-        // --- 纯色背景模式 ---
-        // 为 QTextBrowser 准备样式表
-        browserStyle = QString("QTextBrowser { background-color: %1; color: %2; border: none; }")
-                           .arg(settings.backgroundColor().name(QColor::HexRgb))
-                           .arg(settings.textColor().name(QColor::HexRgb));
-
-        // 为 QListWidget 准备样式表
-        listStyle = QString(
-                        "QListWidget { background-color: %1; color: %2; border: none; }"
-                        "QListWidget::item:selected { background-color: #4a6984; color: white; }"
-                        ).arg(settings.backgroundColor().name(QColor::HexRgb)).arg(settings.textColor().name(QColor::HexRgb));
-    }
-
-    // 3. --- 将生成的样式表应用到控件 ---
-    ui->textBrowser->setStyleSheet(browserStyle);
-    ui->chaptersListWidget->setStyleSheet(listStyle);
-}
 void ReadingView::showContextMenu(const QPoint &pos)
 {
     if (!m_bookManager) return;
@@ -855,79 +985,45 @@ void ReadingView::findPrevious()
     QMessageBox::information(this, "查找结果", "已到达第一个匹配项");
 }
 
+// 8. 修复highlightFoundText - Qt 6 兼容版本 ✅
 void ReadingView::highlightFoundText(const QTextCursor& cursor)
 {
-    // 获取当前设置管理器
     auto& settings = SettingsManager::instance();
 
-    // ★★★ 修复高亮显示重复和排版混乱问题 ★★★483-489
-
-    // 1. 先清除所有现有的高亮格式
+    // 先清除所有格式
     QTextCursor resetCursor(ui->textBrowser->document());
     resetCursor.select(QTextCursor::Document);
-    QTextCharFormat clearFormat;
-    clearFormat.setBackground(Qt::transparent);
-    clearFormat.setForeground(settings.textColor()); // 恢复默认文本颜色
-    resetCursor.mergeCharFormat(clearFormat);
+    QTextCharFormat defaultFormat;
+    defaultFormat.setBackground(Qt::transparent);
+    defaultFormat.setForeground(settings.textColor());
+    resetCursor.mergeCharFormat(defaultFormat);
 
-    // 2. 设置新的高亮颜色，确保在夜间模式黑色背景下也能清晰可见
-    QColor highlightColor;
-    QColor highlightTextColor;
+    // 应用新的搜索高亮
+    QColor highlightColor = settings.isNightMode() ?
+                                QColor("#40E0D0") : QColor("#FBBF24");
+    QColor highlightTextColor = QColor("#000000");
 
-    // 根据是否为夜间模式选择更合适的高亮颜色
-    if (settings.isNightMode()) {
-        // 更改为亮青色背景和深色文字，确保在任何深色夜间背景下都清晰可见
-        highlightColor = QColor("#40E0D0");  // ***绿松石/青色 (Turquoise)，高对比度
-        highlightTextColor = QColor("#000000");  // 黑色文字，与亮青色形成强烈对比
-    } else {
-        highlightColor = QColor("#FBBF24");  // ***明亮的黄色背景
-        highlightTextColor = QColor("#000000");  // 黑色文字
-    }
-
-    // 3. 设选中文本的格式
     QTextCharFormat format;
     format.setBackground(highlightColor);
     format.setForeground(highlightTextColor);
 
-    // 4. 创建一个新的光标来设置格式，只高亮当前找到的文本
     QTextCursor highlightCursor = cursor;
-
-    // ***514-526***
     if (!highlightCursor.hasSelection()) {
-        // 如果没有选中文本，选中当前单词
         highlightCursor.select(QTextCursor::WordUnderCursor);
     }
 
-    // 应用高亮格式
     highlightCursor.mergeCharFormat(format);
-
-    // ★★★ 核心修复：清除选中状态，防止系统选中颜色覆盖自定义高亮 ★★★
     highlightCursor.clearSelection();
-
-    // 设置文本浏览器的当前光标为高亮光标
     ui->textBrowser->setTextCursor(highlightCursor);
-
-    // 5. 确保找到的文本可见
     ui->textBrowser->ensureCursorVisible();
 
-    // 6. 更新当前位置
     m_currentPosition = ui->textBrowser->verticalScrollBar()->value();
-}
-// readingview.cpp (在文件任意合适位置添加)
 
-void ReadingView::clearHighlights()//****536-549
-{
-    // 使用新的光标对象来操作整个文档
-    QTextCursor cursor(ui->textBrowser->document());
-
-    // 创建一个默认的格式
-    QTextCharFormat defaultFormat;
-
-    // 移动光标选择整个文档
-    cursor.select(QTextCursor::Document);
-
-    // 应用默认格式，这会移除所有自定义字符格式（包括搜索高亮）
-    cursor.setCharFormat(defaultFormat);
+    // 重新应用书签和关键词高亮 ✅
+    applyBookmarksToChapter(m_currentChapterIndex);
+    if (m_highlighter) {
+        QTimer::singleShot(10, m_highlighter, &KeyWordHighlighter::highlight);
+    }
 }
 
 // 翻页功能
@@ -979,11 +1075,15 @@ void ReadingView::previousPage()
 
 
 
-
+/////////////////////////////////////
 //听书
+// 2. 修复 fetchAccessToken - 添加调试和错误处理
+// ==================== readingview.cpp - 完整修复版 ====================
+
+// 1. 获取 Token (添加详细日志)
 void ReadingView::fetchAccessToken()
 {
-    // --- 替换为你在百度AI平台申请的真实 Key ---
+
     QString apiKey = "MTHZ5WTDHRpZOPySBgZW2M3K";
     QString secretKey = "HAVi9Qoif8BSK4X9PjKOKSqUSM6Bw4n7";
 
@@ -994,8 +1094,10 @@ void ReadingView::fetchAccessToken()
     params.addQueryItem("client_secret", secretKey);
     url.setQuery(params);
 
+
     QNetworkRequest request(url);
     QNetworkReply *reply = m_networkManager->get(request);
+
     connect(reply, &QNetworkReply::finished, this, [this, reply](){
         onAccessTokenReplyFinished(reply);
     });
@@ -1003,171 +1105,319 @@ void ReadingView::fetchAccessToken()
 
 void ReadingView::onAccessTokenReplyFinished(QNetworkReply *reply)
 {
+
     if (reply->error() == QNetworkReply::NoError) {
         QByteArray data = reply->readAll();
+
         QJsonDocument doc = QJsonDocument::fromJson(data);
-        m_accessToken = doc.object().value("access_token").toString();
-        qDebug() << "Access Token acquired:" << m_accessToken;
-    } else {
-        qDebug() << "Failed to get access token:" << reply->errorString();
+        QJsonObject obj = doc.object();
+
+        if (obj.contains("access_token")) {
+            m_accessToken = obj.value("access_token").toString();
+            qDebug() << "✅✅✅ Token 获取成功! ✅✅✅";
+        }
     }
     reply->deleteLater();
 }
-//实现请求语音合成和播放的逻辑
+
+// 2. 请求语音合成 (关键修复 - 添加详细日志)
 void ReadingView::requestSpeech(const QString &text)
 {
+
     if (m_accessToken.isEmpty()) {
-        qDebug() << "Access Token is not ready!";
+        qDebug() << "❌❌❌ Token 为空，无法合成语音！ ❌❌❌";
+        QMessageBox::warning(this, "错误", "语音服务未就绪,请稍后再试。\n(Token未获取)");
         return;
     }
 
+
     QUrl url("https://tsn.baidu.com/text2audio");
     QUrlQuery params;
-    params.addQueryItem("tex", text);             // 要合成的文本
-    params.addQueryItem("tok", m_accessToken);    // Access Token
-    params.addQueryItem("cuid", "some-random-id"); // 客户端唯一标识，随便填
-    params.addQueryItem("ctp", "1");              // 客户端类型，填1
-    params.addQueryItem("lan", "zh");             // 语言，zh中文
-    params.addQueryItem("per", "4");              // 音色选择，4是度逍遥（情感男声），可以换成0,1,3,5等
-    params.addQueryItem("spd", "5");              // 语速，0-15，默认5
-    params.addQueryItem("aue", "3");              // 音频格式，3是mp3
+    params.addQueryItem("tex", text);
+    params.addQueryItem("tok", m_accessToken);
+    params.addQueryItem("cuid", "reader-app-001");
+    params.addQueryItem("ctp", "1");
+    params.addQueryItem("lan", "zh");
+    params.addQueryItem("per", "4");
+    params.addQueryItem("spd", "5");
+    params.addQueryItem("pit", "5");
+    params.addQueryItem("vol", "15"); // 最大音量
+    params.addQueryItem("aue", "3");
 
     QByteArray postData = params.query(QUrl::FullyEncoded).toUtf8();
+
 
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
     QNetworkReply *reply = m_networkManager->post(request, postData);
+
     connect(reply, &QNetworkReply::finished, this, [this, reply](){
         onTtsReplyFinished(reply);
     });
 }
 
-// readingview.cpp
-
+// 3. 处理 TTS 响应
 void ReadingView::onTtsReplyFinished(QNetworkReply *reply)
 {
-    // 检查返回的 Content-Type，如果不是音频则说明出错了
-    if (reply->header(QNetworkRequest::ContentTypeHeader).toString().contains("audio/")) {
-        // 成功获取 MP3 数据
-        QByteArray audioData = reply->readAll();
 
-        // --- 核心修复：为 QBuffer 设置 parent ---
-        QBuffer *buffer = new QBuffer(m_player); // <--- 将 m_player 作为 buffer 的父对象！
+    if (reply->error() != QNetworkReply::NoError) {
+        QMessageBox::warning(this, "错误", "网络请求失败: " + reply->errorString());
+        onPlayerStopRequested();
+        reply->deleteLater();
+        return;
+    }
 
-        // // 确保旧的源设备被正确清理
-        // if (m_player->sourceDevice()) {
-        //     m_player->sourceDevice()->deleteLater();
-        // }
+    QString contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
+    QByteArray responseData = reply->readAll();
 
-        buffer->setData(audioData);
-        buffer->open(QIODevice::ReadOnly);
 
-        m_player->setSourceDevice(buffer);
-        m_player->play();
+    // 判断是否为音频
+    if (contentType.contains("audio/") || responseData.size() > 1000) {
+
+        // 停止当前播放
+        if (m_player->playbackState() != QMediaPlayer::StoppedState) {
+            qDebug() << "停止当前播放...";
+            m_player->stop();
+            QThread::msleep(100);
+        }
+
+        // 清理旧 buffer
+        while (m_audioBuffers.size() > 2) {
+            QBuffer* old = m_audioBuffers.takeFirst();
+            old->deleteLater();
+        }
+
+        // 创建新 buffer
+        QBuffer *newBuffer = new QBuffer(this);
+        newBuffer->setData(responseData);
+
+        if (!newBuffer->open(QIODevice::ReadOnly)) {
+            delete newBuffer;
+            reply->deleteLater();
+            return;
+        }
+
+        m_audioBuffers.append(newBuffer);
+
+        // 设置音频源
+        m_player->setSourceDevice(newBuffer);
+
+        // 确保音量
+        if (m_audioOutput) {
+            m_audioOutput->setVolume(1.0);
+        }
+
+        // 延迟播放
+        QTimer::singleShot(200, this, [this]() {
+
+            m_player->play();
+
+            // 检查播放
+            QTimer::singleShot(300, this, [this]() {
+
+                if (m_player->error() != QMediaPlayer::NoError) {
+                    qDebug() << "❌ 错误:" << m_player->errorString();
+                } else {
+                    qDebug() << "✅ 状态正常";
+                }
+
+                if (m_audioOutput) {
+                    qDebug() << "音量:" << m_audioOutput->volume();
+                    qDebug() << "是否静音:" << m_audioOutput->isMuted();
+                } else {
+                    qDebug() << "❌ audioOutput 是 null";
+                }
+            });
+        });
 
     } else {
-        // 出错了，打印错误信息
-        qDebug() << "TTS request failed:" << reply->readAll();
-        // ★★★ 调试技巧：当 TTS 请求失败时，也应该让播放器停止 ★★★
+        // 不是音频
+
+        QJsonDocument doc = QJsonDocument::fromJson(responseData);
+        if (!doc.isNull()) {
+            QJsonObject obj = doc.object();
+            QString errorMsg = obj.value("err_msg").toString();
+            int errorNo = obj.value("err_no").toInt();
+            qDebug() << "错误码:" << errorNo << "错误信息:" << errorMsg;
+            QMessageBox::warning(this, "TTS错误",
+                                 QString("错误码: %1\n错误信息: %2").arg(errorNo).arg(errorMsg));
+        }
+
         onPlayerStopRequested();
     }
+
     reply->deleteLater();
 }
 
-// 当 TtsPlayer 的播放按钮被点击
-void ReadingView::onPlayerPlayRequested(int index)
+// 3. 播放状态改变 (核心修复 - 自动播放下一句)
+// readingview.cpp
+
+void ReadingView::onPlayerStateChanged(QMediaPlayer::PlaybackState state)
 {
-    if(m_sentences.isEmpty()) {
-        // 第一次播放，准备文本
-        QString fullText = ui->textBrowser->toPlainText();
-       m_sentences = fullText.split(QRegularExpression("[。？！]"), Qt::SkipEmptyParts); // <-- 正确的 Qt6 写法
-        if(m_sentences.isEmpty()) return;
-        m_ttsPlayer->setTotalSentences(m_sentences.size());
-    }
-    onPlayerSentenceChangeRequested(index);
-}
+    qDebug() << "【播放状态改变】" << m_previousPlaybackState << "->" << state;
 
-// 切换句子的核心函数
-void ReadingView::onPlayerSentenceChangeRequested(int newIndex)
-{
-    if (newIndex < 0 || newIndex >= m_sentences.size()) return;
+    // 检查是否是“正常播放结束”的转换
+    // 条件：上一个状态是 Playing，当前状态是 Stopped
+    bool isPlaybackFinished = (m_previousPlaybackState == QMediaPlayer::PlayingState &&
+                               state == QMediaPlayer::StoppedState);
 
-    m_currentSentenceIndex = newIndex;
-    m_ttsPlayer->setCurrentIndex(newIndex);//更新索引，按钮状态
-    // 更新进度条等UI
-    // --- 新增：计算并更新进度条 ---
-    if (m_totalSentences > 0) {
-        // 使用浮点数进行计算以保证精度，避免整数除法得到0
-        double progress = (static_cast<double>(m_currentSentenceIndex + 1) / m_totalSentences) * 100.0;
-        m_ttsPlayer->updateProgress(static_cast<int>(progress)); // 发送更新指令
-    }
-    highlightSentence(newIndex);
-    requestSpeech(m_sentences.at(newIndex));
-}
-
-void ReadingView::onPlayerPauseRequested() { m_player->pause(); }
-void ReadingView::onPlayerResumeRequested() { m_player->play(); }
-void ReadingView::onPlayerStopRequested() {
-    m_player->stop();
-    m_ttsPlayer->updateProgress(0); // <-- 新增：停止时将进度条归零
-    unhighlightAll();
-}
-
-// 监听 QMediaPlayer 的状态，实现自动播放下一句
-void ReadingView::onPlayerStateChanged(QMediaPlayer::PlaybackState  state)
-{
+    // 更新UI（这部分逻辑不变）
     if (state == QMediaPlayer::PlayingState) {
         m_ttsPlayer->onStateChanged(true, false);
     } else if (state == QMediaPlayer::PausedState) {
         m_ttsPlayer->onStateChanged(false, true);
     } else if (state == QMediaPlayer::StoppedState) {
         m_ttsPlayer->onStateChanged(false, false);
+    }
 
-        // 判断是否是正常播放结束
-        if (m_player->mediaStatus() == QMediaPlayer::EndOfMedia) {
-            // 自动播放下一句
-            if (m_currentSentenceIndex < m_sentences.size() - 1) {
+    // 更新上一个状态的记录
+    m_previousPlaybackState = state;
+
+    // --- 核心修复：在这里处理自动播放下一句 ---
+    if (isPlaybackFinished && !m_isWaitingForNextSentence) {
+        qDebug() << "✅✅✅ 检测到正常播放结束，准备自动播放下一句 ✅✅✅";
+
+        // 检查是否还有下一句
+        if (m_currentSentenceIndex < m_sentences.size() - 1) {
+            m_isWaitingForNextSentence = true; // 设置状态锁
+
+            // 延迟后播放下一句
+            QTimer::singleShot(200, this, [this]() { // 延时可以短一点
+                qDebug() << "【自动切换】开始请求下一句";
                 onPlayerSentenceChangeRequested(m_currentSentenceIndex + 1);
-            } else {
-                qDebug() << "All sentences finished.";
-            }
+            });
+        } else {
+            qDebug() << "✅✅✅ 所有句子播放完成! ✅✅✅";
+            m_ttsPlayer->updateProgress(100);
         }
     }
-    //播放结束的设置
-    if (state == QMediaPlayer::StoppedState) {
-        m_ttsPlayer->onStateChanged(false, false);
+}
 
-        if (m_player->mediaStatus() == QMediaPlayer::EndOfMedia) {
-            if (m_currentSentenceIndex < m_sentences.size() - 1) {
-                onPlayerSentenceChangeRequested(m_currentSentenceIndex + 1);
-            } else {
-                qDebug() << "All sentences finished.";
-                m_ttsPlayer->updateProgress(100); // <-- 优化：确保结束时进度为100%
-            }
-        }
+// 5. 播放器错误
+void ReadingView::onPlayerError(QMediaPlayer::Error error, const QString &errorString)
+{
+
+    QMessageBox::warning(this, "播放错误",
+                         QString("播放器错误:\n%1\n错误代码: %2").arg(errorString).arg(error));
+}
+
+// 6. 切换句子
+void ReadingView::onPlayerSentenceChangeRequested(int newIndex)
+{
+    m_isWaitingForNextSentence = false; // <-- 在这里重置状态锁！
+    if (newIndex < 0 || newIndex >= m_sentences.size()) {
+        return;
     }
+
+    m_currentSentenceIndex = newIndex;
+    m_ttsPlayer->setCurrentIndex(newIndex);
+
+    if (m_totalSentences > 0) {
+        int progress = (m_currentSentenceIndex + 1) * 100 / m_totalSentences;
+        m_ttsPlayer->updateProgress(progress);
+    }
+
+    highlightSentence(newIndex);
+
+    QString textToSpeak = m_sentences.at(newIndex).trimmed();
+
+    // ✅ 这里调用 requestSpeech
+    requestSpeech(textToSpeak);
+}
+
+// 7. 停止播放
+void ReadingView::onPlayerStopRequested()
+{
+    m_player->stop();
+    m_ttsPlayer->updateProgress(0);
+    unhighlightAll();
+    m_isWaitingForNextSentence = false;
+    m_previousPlaybackState = QMediaPlayer::StoppedState; // <-- 添加在这里！
+
+    for (QBuffer* buffer : m_audioBuffers) {
+        buffer->deleteLater();
+    }
+    m_audioBuffers.clear();
 
 }
 
-//阅读中高亮
+// 8. 开始听书
+void ReadingView::onListenButtonClicked()
+{
+
+    if (m_ttsPlayer->isVisible()) {
+        onPlayerStopRequested();
+        m_ttsPlayer->hide();
+        return;
+    }
+
+    QString fullText = ui->textBrowser->toPlainText();
+    m_sentences.clear();
+    fullText = fullText.simplified();
+
+    QStringList tempSentences = fullText.split(
+        QRegularExpression("[。！？；]"),
+        Qt::SkipEmptyParts
+        );
+
+    for (const QString& sentence : tempSentences) {
+        QString cleaned = sentence.trimmed();
+        if (cleaned.length() >= 5) {
+            m_sentences.append(cleaned);
+        }
+    }
+
+
+    if (m_sentences.isEmpty()) {
+        QMessageBox::information(this, "提示", "当前没有可供朗读的文本。");
+        return;
+    }
+
+
+    m_totalSentences = m_sentences.size();
+    m_currentSentenceIndex = 0;
+    m_isWaitingForNextSentence = false;
+
+    m_previousPlaybackState = QMediaPlayer::StoppedState; // <-- 添加在这里！
+
+    m_ttsPlayer->setTotalSentences(m_totalSentences);
+    m_ttsPlayer->setCurrentIndex(m_currentSentenceIndex);
+    m_ttsPlayer->updateProgress(0);
+    m_ttsPlayer->onStateChanged(false, false);
+
+    m_ttsPlayer->show();
+
+    // 开始播放第一句
+    onPlayerSentenceChangeRequested(0);
+}
+
+// 其他函数保持不变...
+void ReadingView::onPlayerPauseRequested() {
+    m_player->pause();
+}
+
+void ReadingView::onPlayerResumeRequested() {
+    m_player->play();
+}
+
+void ReadingView::onPlayerPlayRequested(int index)
+{
+    onPlayerSentenceChangeRequested(index);
+}
 
 void ReadingView::highlightSentence(int index)
 {
-    // 先取消之前所有的高亮
     unhighlightAll();
-
     if (index < 0 || index >= m_sentences.size()) return;
 
-    // 这只是一个简单的实现，可能需要根据你的实际文本结构进行微调
     QString sentenceToFind = m_sentences.at(index);
-
     QTextCursor cursor(ui->textBrowser->document());
     cursor = ui->textBrowser->document()->find(sentenceToFind, cursor);
 
     if (!cursor.isNull()) {
         QTextCharFormat format;
-        format.setBackground(Qt::yellow); // 设置高亮背景色为黄色
+        format.setBackground(Qt::yellow);
         cursor.setCharFormat(format);
     }
 }
@@ -1175,58 +1425,17 @@ void ReadingView::highlightSentence(int index)
 void ReadingView::unhighlightAll()
 {
     QTextCursor cursor(ui->textBrowser->document());
-    cursor.select(QTextCursor::Document); // 选中全部文档
+    cursor.select(QTextCursor::Document);
 
     QTextCharFormat format;
-    format.setBackground(Qt::transparent); // 设置背景为透明
+    format.setBackground(Qt::transparent);
     cursor.setCharFormat(format);
 
-    cursor.clearSelection(); // 取消选中
-    ui->textBrowser->setTextCursor(cursor); // 更新光标
+    cursor.clearSelection();
+    ui->textBrowser->setTextCursor(cursor);
 }
 
-
-
-// --- 在这里添加缺失的 onListenButtonClicked 函数实现 ---
-
-void ReadingView::onListenButtonClicked()
-{
-    // 检查播放器是否已经可见，如果可见，则隐藏它并停止播放
-    if (m_ttsPlayer->isVisible()) {
-        onPlayerStopRequested(); // 调用我们写好的停止函数
-        m_ttsPlayer->hide();
-        return;
-    }
-
-    // --- 准备文本 ---
-    QString fullText = ui->textBrowser->toPlainText();
-    m_sentences = fullText.split(QRegularExpression("[。？！]"), Qt::SkipEmptyParts);
-
-    if (m_sentences.isEmpty()) {
-        qDebug() << "No text to read.";
-        // 在这里可以弹出一个提示框告诉用户没有内容
-        QMessageBox::information(this, "提示", "当前没有可供朗读的文本。");
-        return;
-    }
-
-    // --- 初始化状态 ---
-    m_totalSentences = m_sentences.size();
-    m_currentSentenceIndex = 0;
-
-    // --- 初始化播放器 UI ---
-    m_ttsPlayer->setTotalSentences(m_totalSentences);
-    m_ttsPlayer->setCurrentIndex(m_currentSentenceIndex);
-    m_ttsPlayer->updateProgress(0); // 确保进度条从0开始
-    m_ttsPlayer->onStateChanged(false, false); // 确保按钮是“播放”状态
-
-    // --- 显示播放器并开始播放 ---
-    m_ttsPlayer->show();
-
-    // 自动开始播放第一句
-    onPlayerSentenceChangeRequested(0);
-}
-
-
+//////////////////
 void ReadingView::onSliderChanged()
 {
     double hCur = ui->textBrowser->verticalScrollBar()->value();
@@ -1246,10 +1455,16 @@ void ReadingView::notepad()
     qdialog->exec();
 }
 
+// 6. 修复关键词对话框 ✅
 void ReadingView::showKeyword()
 {
     KeywordDialog dialog(this);
-    if (dialog.exec() == QDialog::Accepted) {}
+    if (dialog.exec() == QDialog::Accepted) {
+        // 对话框关闭后,触发重新高亮 ✅
+        if (m_highlighter) {
+            m_highlighter->highlight();
+        }
+    }
 }
 
 
@@ -1257,4 +1472,28 @@ void ReadingView::saveProgress()
 {
     ConfigManager::instance().setLastPage(m_currentBook.filePath, ui->textBrowser->verticalScrollBar()->value());
     ConfigManager::instance().setTotalPage(m_currentBook.filePath, ui->textBrowser->verticalScrollBar()->maximum());
+}
+
+// 在 readingview.cpp 中添加此函数实现
+
+void ReadingView::clearHighlights()
+{
+    // 清除所有搜索高亮
+    QTextCursor cursor(ui->textBrowser->document());
+    cursor.select(QTextCursor::Document);
+
+    QTextCharFormat defaultFormat;
+    defaultFormat.setBackground(Qt::transparent);
+    defaultFormat.setForeground(SettingsManager::instance().textColor());
+
+    cursor.mergeCharFormat(defaultFormat);
+
+    // 重新应用书签和关键词高亮 ✅
+    if (m_currentChapterIndex >= 0) {
+        applyBookmarksToChapter(m_currentChapterIndex);
+    }
+
+    if (m_highlighter) {
+        QTimer::singleShot(0, m_highlighter, &KeyWordHighlighter::highlight);
+    }
 }

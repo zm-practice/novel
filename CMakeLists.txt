@@ -9,8 +9,8 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network)
+find_package( Qt6  REQUIRED COMPONENTS Widgets Network Multimedia )
+#find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network )
 
 set(PROJECT_SOURCES
         main.cpp
@@ -57,6 +57,15 @@ add_executable(demo3_QT ${PROJECT_SOURCES}
         dictionaryservice.h dictionaryservice.cpp
         tooltippopup.h tooltippopup.cpp tooltippopup.ui
         data.qrc
+        ttsplayer.h ttsplayer.cpp ttsplayer.ui
+        timerwindow.h timerwindow.cpp
+        configmanager.h configmanager.cpp
+        keyworddialog.h keyworddialog.cpp
+        keywordhighlighter.h keywordhighlighter.cpp
+        keywordmanager.h keywordmanager.cpp
+        notepadwidget.h
+        style.qrc
+        style.qss
 
 
 
@@ -85,7 +94,7 @@ add_executable(demo3_QT ${PROJECT_SOURCES}
 #     endif()
 # endif()
 target_include_directories(demo3_QT PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(demo3_QT PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Network)
+target_link_libraries(demo3_QT PRIVATE Qt::Widgets Qt::Network Qt::Multimedia)
 
 #这一段是原来就删了的
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>643</width>
-    <height>486</height>
+    <width>690</width>
+    <height>512</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -28,16 +28,60 @@
      <property name="minimumSize">
       <size>
        <width>120</width>
-       <height>350</height>
+       <height>400</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
        <width>120</width>
-       <height>350</height>
+       <height>450</height>
       </size>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <widget class="QPushButton" name="timerButton">
+        <property name="font">
+         <font>
+          <family>楷体</family>
+          <pointsize>12</pointsize>
+         </font>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">
+#timerButton {
+    /* 1. 让按钮尺寸和你的图片完全一样 */
+    /*    假设你的图片是 64x64 像素 */
+    min-width: 64px;
+    min-height: 64px;
+    max-width: 64px;
+    max-height: 64px;
+
+    /* 2. 移除按钮自身的背景和边框，让它“隐形” */
+    background-color: transparent;
+    border: none;
+
+    /* 3. 【核心】将你的图片作为按钮的“边框图片” */
+    /*    这会把图片完整地、不失真地铺满整个按钮区域 */
+    /*    请务必将路径替换成你资源文件里的真实路径！ */
+    border-image: url(:/icons/clock.png);
+}
+
+/* 交互效果：当鼠标按下时 */
+#timerButton:pressed {
+    /* 增加一点内边距，让图片向右下角轻微移动 */
+    /* 这会产生一个非常逼真的“被按下”的物理效果 */
+    padding-top: 2px;
+    padding-left: 2px;
+}</string>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="flat">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
       <item>
        <spacer name="verticalSpacer">
         <property name="orientation">
@@ -65,9 +109,57 @@
           <pointsize>12</pointsize>
          </font>
         </property>
+        <property name="styleSheet">
+         <string notr="true">QToolButton {
+    /* 1. 【核心】使用 qproperty-icon 来设置图标 */
+    /*    请确保 URL 路径是您在资源文件中的正确路径！ */
+    qproperty-icon: url(:/icons/bookshelf.png);
+
+    /* 2. 颜色方案 (保持不变) */
+    background-color: #FDEBD0;
+    border: 1px solid #F5CBA7;
+    color: #BF7137;
+
+    /* 3. 布局调整 (保持不变) */
+    spacing: 8px; /* 图标和文字的间距 */
+    padding: 5px 15px 5px 10px; /* 上 右 下 左 */
+    
+    /* 4. 其他基础样式 */
+    border-radius: 8px;
+}
+
+/* 鼠标悬浮状态 (当按钮未被选中时) */
+QToolButton:hover:!checked {
+    background-color: #FEF5E7;
+    border-color: #FAD7A0;
+}
+
+/* 选中状态 */
+QToolButton:checked {
+    background-color: #AEC6CF;
+    border-color: #AEC6CF;
+    color: white;
+}
+
+/* 按下特效 */
+QToolButton:pressed {
+    background-color: #FAD7A0;
+    padding-top: 6px;
+    padding-bottom: 4px;
+}</string>
+        </property>
         <property name="text">
          <string>书架</string>
         </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="toolButtonStyle">
+         <enum>Qt::ToolButtonStyle::ToolButtonTextBesideIcon</enum>
+        </property>
+        <attribute name="buttonGroup">
+         <string notr="true">buttonGroup</string>
+        </attribute>
        </widget>
       </item>
       <item>
@@ -84,9 +176,59 @@
           <pointsize>12</pointsize>
          </font>
         </property>
+        <property name="styleSheet">
+         <string notr="true">
+
+QToolButton {
+    /* 1. 【核心】使用 qproperty-icon 来设置图标 */
+    /*    请确保 URL 路径是您在资源文件中的正确路径！ */
+    qproperty-icon: url(:/icons/mine.png);
+
+    /* 2. 颜色方案 (保持不变) */
+    background-color: #FDEBD0;
+    border: 1px solid #F5CBA7;
+    color: #BF7137;
+
+    /* 3. 布局调整 (保持不变) */
+    spacing: 8px; /* 图标和文字的间距 */
+    padding: 5px 15px 5px 10px; /* 上 右 下 左 */
+    
+    /* 4. 其他基础样式 */
+    border-radius: 8px;
+}
+
+/* 鼠标悬浮状态 (当按钮未被选中时) */
+QToolButton:hover:!checked {
+    background-color: #FEF5E7;
+    border-color: #FAD7A0;
+}
+
+/* 选中状态 */
+QToolButton:checked {
+    background-color: #AEC6CF;
+    border-color: #AEC6CF;
+    color: white;
+}
+
+/* 按下特效 */
+QToolButton:pressed {
+    background-color: #FAD7A0;
+    padding-top: 6px;
+    padding-bottom: 4px;
+}</string>
+        </property>
         <property name="text">
          <string>我的</string>
         </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="toolButtonStyle">
+         <enum>Qt::ToolButtonStyle::ToolButtonTextBesideIcon</enum>
+        </property>
+        <attribute name="buttonGroup">
+         <string notr="true">buttonGroup</string>
+        </attribute>
        </widget>
       </item>
      </layout>
@@ -105,6 +247,19 @@
        <item>
         <widget class="QWidget" name="buttonContainer" native="true">
          <layout class="QHBoxLayout" name="horizontalLayout_2">
+          <item>
+           <spacer name="horizontalSpacer">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
           <item>
            <widget class="QPushButton" name="addButton">
             <property name="font">
@@ -154,4 +309,7 @@
  </widget>
  <resources/>
  <connections/>
+ <buttongroups>
+  <buttongroup name="buttonGroup"/>
+ </buttongroups>
 </ui>

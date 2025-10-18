@@ -28,7 +28,7 @@ SideNavigationView::SideNavigationView(QWidget *parent) :
 
     ui->timerButton->setToolTip("打开悬浮时钟窗口");
     ui->timerButton->setFixedSize(80, 30); // 设置固定大小
-    ui->timerButton->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 4px; }");
+    //ui->timerButton->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 4px; }");
 
 
     // 连接按钮的clicked信号到showTimerWindow槽

@@ -66,7 +66,7 @@ void KeywordManager::load()
 void KeywordManager::save()
 {
     QJsonArray arr;
-    for (const auto& r : qAsConst(m_rules)) {
+   for (const auto& r : std::as_const(m_rules)) {  // ✅ Qt 6 推荐
         QJsonObject o;
         o["word"]  = r.word;
         o["color"] = r.color.name(QColor::HexArgb);
