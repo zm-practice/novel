@@ -15,6 +15,8 @@ struct BookInfo
 //书签
 struct BookmarkInfo
 {
+    enum Type { Bookmark, Note };
+    Type type;
     int chapterIndex;
     int startPos;
     int endPos;
@@ -22,6 +24,7 @@ struct BookmarkInfo
     QColor backgroundColor;
     int underlineStyle;
     QColor underlineColor;
+    QString content;
 };
 
 #endif // BOOKDATA_H

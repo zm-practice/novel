@@ -99,7 +99,10 @@ private slots:
     void saveProgress();
 
     // readingview.h 的 private 部分
-
+    // ========== 新增：侧边栏控制槽函数 ==========
+    void toggleChapterPanel();      // 切换目录面板
+    void toggleSettingsPanel();     // 切换设置面板
+    void updateProgressLabel();     // 更新进度标签
 private:
     void parseChapters(const QString& content);
     void applyBookmarksToChapter(int chapterIndex);
@@ -107,10 +110,13 @@ private:
     void fetchAccessToken();
     void requestSpeech(const QString &text);
     void clearHighlights();
+    void clearSearchHighlights();
     void highlightSentence(int index);
     void unhighlightAll();
     void highlightFoundText(const QTextCursor& cursor);
     void scrollToPosition(int position);
+    void applyKeywordHighlighting();
+     void switchToChapter(int chapterIndex);
 
     // ========== UI相关 ==========
     Ui::ReadingView *ui;
@@ -163,6 +169,9 @@ private:
     QList<QBuffer*> m_audioBuffers;  // ✅ 用于管理所有buffer的生命周期
 
     QMediaPlayer::PlaybackState m_previousPlaybackState = QMediaPlayer::StoppedState; // <-- 新增
+    // ========== 新增：侧边栏状态变量 ==========
+    bool m_settingsPanelVisible;    // 设置面板是否可见
+    // m_chapterListVisible 已经存在，保持不变
 
 };
 

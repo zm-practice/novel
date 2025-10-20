@@ -6,6 +6,7 @@
 #include <QMessageBox> // <--- 在文件顶部添加这个头文件
 #include "bookeditdialog.h"
 #include "readerwindow.h"
+#include "myprofileview.h"
 SideNavigationView::SideNavigationView(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::SideNavigationView)
@@ -23,18 +24,31 @@ SideNavigationView::SideNavigationView(QWidget *parent) :
     // 设置默认显示的页面
     ui->contentStackedWidget->setCurrentWidget(ui->bookshelfPage);
 
+    // 创建并初始化MyProfileView
+    m_myProfileView = new MyProfileView(this);
+    ui->myProfilePage->setLayout(new QVBoxLayout(ui->myProfilePage));
+    ui->myProfilePage->layout()->addWidget(m_myProfileView);
+    ui->myProfilePage->layout()->setContentsMargins(0, 0, 0, 0);
 
     // 创建悬浮时钟按钮
-
     ui->timerButton->setToolTip("打开悬浮时钟窗口");
     ui->timerButton->setFixedSize(80, 30); // 设置固定大小
     //ui->timerButton->setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 4px; }");
 
-
     // 连接按钮的clicked信号到showTimerWindow槽
     connect(ui->timerButton, &QPushButton::clicked, this, &SideNavigationView::showTimerWindow);
 
-
+    // 连接MyProfileView的openBookRequest信号到处理函数
+    connect(m_myProfileView, &MyProfileView::openBookRequest, 
+            this, [this](const BookInfo &book, int chapterIndex, int position) {
+                ReaderWindow *reader = new ReaderWindow(book, m_bookManager, this);
+                reader->setAttribute(Qt::WA_DeleteOnClose);
+                reader->show();
+                // 如果需要，可以在这里设置章节和位置
+                if (chapterIndex >= 0) {
+                    reader->jumpToChapter(chapterIndex, QString::number(position));
+                }
+            });
 }
 //time
 void SideNavigationView::showTimerWindow()
@@ -73,6 +87,11 @@ void SideNavigationView::setBookManager(BookManager *manager)
     m_bookManager = manager;
     // 连接 BookManager 的数据变化信号到我们的刷新槽
     connect(m_bookManager, &BookManager::booksChanged, this, &SideNavigationView::refreshBookList);
+
+    // 设置MyProfileView的BookManager
+    if (m_myProfileView) {
+        m_myProfileView->setBookManager(manager);
+    }
 
     // 第一次设置时，立即刷新一次列表
     refreshBookList();

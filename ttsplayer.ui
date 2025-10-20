@@ -6,59 +6,408 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>431</width>
-    <height>300</height>
+    <width>600</width>
+    <height>200</height>
    </rect>
   </property>
-  <property name="windowTitle">
-   <string>Form</string>
+  <property name="minimumSize">
+   <size>
+    <width>600</width>
+    <height>200</height>
+   </size>
   </property>
-  <layout class="QHBoxLayout" name="horizontalLayout">
+  <property name="maximumSize">
+   <size>
+    <width>800</width>
+    <height>200</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>听书播放器</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QWidget#TtsPlayer {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #F8F9FA, stop:1 #E9ECEF);
+    border-radius: 15px;
+}
+
+QPushButton {
+    background-color: #AEC6CF;
+    color: #2C3E50;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-family: &quot;Microsoft YaHei&quot;;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #BBD1D9;
+}
+
+QPushButton:pressed {
+    background-color: #9FB7BF;
+}
+
+QPushButton#playButton, QPushButton#pauseButton {
+    min-width: 100px;
+    min-height: 45px;
+    font-size: 14px;
+    background-color: #5DADE2;
+    color: white;
+}
+
+QPushButton#playButton:hover, QPushButton#pauseButton:hover {
+    background-color: #3498DB;
+}
+
+QPushButton#prevButton, QPushButton#nextButton {
+    min-width: 90px;
+    min-height: 40px;
+}
+
+QPushButton#closeButton {
+    background-color: #E74C3C;
+    color: white;
+    min-width: 80px;
+    min-height: 35px;
+}
+
+QPushButton#closeButton:hover {
+    background-color: #C0392B;
+}
+
+QSlider::groove:horizontal {
+    border: 1px solid #BDBDBD;
+    height: 8px;
+    background: #E0E0E0;
+    margin: 2px 0;
+    border-radius: 4px;
+}
+
+QSlider::handle:horizontal {
+    background: #5DADE2;
+    border: 2px solid #3498DB;
+    width: 18px;
+    margin: -5px 0;
+    border-radius: 9px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #3498DB;
+}
+
+QSlider::sub-page:horizontal {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #5DADE2, stop:1 #3498DB);
+    border: 1px solid #3498DB;
+    height: 8px;
+    border-radius: 4px;
+}
+
+QLabel#titleLabel {
+    color: #2C3E50;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+QLabel#infoLabel {
+    color: #546E7A;
+    font-size: 13px;
+}
+
+QLabel#progressLabel {
+    color: #5DADE2;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+QFrame#separatorLine {
+    background-color: #CFD8DC;
+}</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>15</number>
+   </property>
+   <property name="leftMargin">
+    <number>20</number>
+   </property>
+   <property name="topMargin">
+    <number>20</number>
+   </property>
+   <property name="rightMargin">
+    <number>20</number>
+   </property>
+   <property name="bottomMargin">
+    <number>20</number>
+   </property>
    <item>
-    <widget class="QPushButton" name="playPauseButton">
-     <property name="font">
-      <font>
-       <family>楷体</family>
-       <pointsize>12</pointsize>
-      </font>
+    <layout class="QHBoxLayout" name="titleLayout">
+     <item>
+      <widget class="QLabel" name="titleLabel">
+       <property name="font">
+        <font>
+         <pointsize>-1</pointsize>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="text">
+        <string>🎧 听书播放器</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="closeButton">
+       <property name="minimumSize">
+        <size>
+         <width>80</width>
+         <height>35</height>
+        </size>
+       </property>
+       <property name="font">
+        <font>
+         <family>Microsoft YaHei</family>
+         <pointsize>-1</pointsize>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="text">
+        <string>✕ 关闭</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QFrame" name="separatorLine">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>2</height>
+      </size>
      </property>
-     <property name="text">
-      <string>播放</string>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>2</height>
+      </size>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Shape::HLine</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Shadow::Sunken</enum>
      </property>
     </widget>
    </item>
    <item>
-    <widget class="QPushButton" name="prevButton">
-     <property name="font">
-      <font>
-       <family>楷体</family>
-       <pointsize>12</pointsize>
-      </font>
-     </property>
-     <property name="text">
-      <string>上一句</string>
-     </property>
-    </widget>
+    <layout class="QHBoxLayout" name="infoLayout">
+     <item>
+      <widget class="QLabel" name="infoLabel">
+       <property name="font">
+        <font>
+         <pointsize>11</pointsize>
+        </font>
+       </property>
+       <property name="text">
+        <string> 句子进度：</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="currentSentenceLabel">
+       <property name="styleSheet">
+        <string notr="true">color: #2C3E50; font-weight: bold;</string>
+       </property>
+       <property name="text">
+        <string>1</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="slashLabel">
+       <property name="text">
+        <string>/</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="totalSentenceLabel">
+       <property name="styleSheet">
+        <string notr="true">color: #2C3E50; font-weight: bold;</string>
+       </property>
+       <property name="text">
+        <string>0</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_2">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="progressLabel">
+       <property name="font">
+        <font>
+         <family>Consolas</family>
+         <pointsize>-1</pointsize>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">color: #5DADE2; font-weight: bold; font-size: 14px;
+   font:</string>
+       </property>
+       <property name="text">
+        <string>0%</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSlider" name="progressSlider">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+      </widget>
+     </item>
+    </layout>
    </item>
    <item>
-    <widget class="QPushButton" name="nextButton">
-     <property name="font">
-      <font>
-       <family>楷体</family>
-       <pointsize>12</pointsize>
-      </font>
+    <layout class="QHBoxLayout" name="controlLayout">
+     <property name="spacing">
+      <number>15</number>
      </property>
-     <property name="text">
-      <string>下一句</string>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QProgressBar" name="progressBar">
-     <property name="value">
-      <number>0</number>
-     </property>
-    </widget>
+     <item>
+      <spacer name="horizontalSpacer_3">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="prevButton">
+       <property name="minimumSize">
+        <size>
+         <width>90</width>
+         <height>40</height>
+        </size>
+       </property>
+       <property name="font">
+        <font>
+         <family>Microsoft YaHei</family>
+         <pointsize>-1</pointsize>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="text">
+        <string>⏮ 上一句</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="playButton">
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>45</height>
+        </size>
+       </property>
+       <property name="font">
+        <font>
+         <family>Microsoft YaHei</family>
+         <pointsize>-1</pointsize>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="text">
+        <string>▶ 播放</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="pauseButton">
+       <property name="enabled">
+        <bool>true</bool>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>100</width>
+         <height>45</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>⏸ 暂停</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="nextButton">
+       <property name="minimumSize">
+        <size>
+         <width>90</width>
+         <height>40</height>
+        </size>
+       </property>
+       <property name="font">
+        <font>
+         <family>Microsoft YaHei</family>
+         <pointsize>-1</pointsize>
+         <bold>true</bold>
+        </font>
+       </property>
+       <property name="text">
+        <string>下一句 ⏭</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="horizontalSpacer_4">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
    </item>
   </layout>
  </widget>

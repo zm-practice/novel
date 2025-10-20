@@ -14,6 +14,13 @@
 #include <QTextCursor>
 #include <QImage>
 #include <QDebug>
+#include <QLineEdit>
+#include <QTextEdit>
+#include <QLabel>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QMessageBox>
 //自动阅读！！！！
 #include <QScrollBar> // 包含滚动条头文件
 #include <QTimer>
@@ -54,12 +61,37 @@
 ReadingView::ReadingView(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::ReadingView),
-    m_currentChapter(0),
     m_currentPosition(0),
     m_lastSearchCaseSensitive(false),
-    m_chapterListVisible(true)
+    m_chapterListVisible(true),
+ m_settingsPanelVisible(false)  // 默认隐藏设置面板
 {
     ui->setupUi(this);
+
+    // 强制使用布局使目录从顶部开始排列
+    if (!ui->chapterPanel->layout()) {
+        auto *chapterLayout = new QVBoxLayout(ui->chapterPanel);
+        chapterLayout->setContentsMargins(8, 8, 8, 8);
+        chapterLayout->setSpacing(8);
+        chapterLayout->addWidget(ui->chapterTitle, 0, Qt::AlignLeft);
+        chapterLayout->addWidget(ui->chaptersListWidget);
+        chapterLayout->setStretch(1, 1);
+    }
+
+    // ========== 新增：侧边栏初始化 ==========
+    // 初始状态：目录显示，设置面板隐藏
+    ui->settingsPanel->hide();
+
+    // 连接折叠按钮
+    connect(ui->toggleChapterButton, &QPushButton::clicked, this, &ReadingView::toggleChapterPanel);
+    connect(ui->toggleSettingsButton, &QPushButton::clicked, this, &ReadingView::toggleSettingsPanel);
+
+    // 更新进度标签的信号连接
+    connect(ui->textBrowser->verticalScrollBar(), &QScrollBar::valueChanged,
+            this, &ReadingView::updateProgressLabel);
+
+
+
     auto& settings = SettingsManager::instance();
 
     // ===================================================================
@@ -220,6 +252,58 @@ ReadingView::~ReadingView()
 // }
 
 
+
+// ========== 新增：侧边栏控制函数 ==========
+
+void ReadingView::toggleChapterPanel()
+{
+    m_chapterListVisible = !m_chapterListVisible;
+
+    if (m_chapterListVisible) {
+        ui->chapterPanel->show();
+        ui->toggleChapterButton->setText("☰");
+        ui->toggleChapterButton->setToolTip("隐藏目录");
+    } else {
+        ui->chapterPanel->hide();
+        ui->toggleChapterButton->setText("☰");
+        ui->toggleChapterButton->setToolTip("显示目录");
+    }
+}
+
+void ReadingView::toggleSettingsPanel()
+{
+    m_settingsPanelVisible = !m_settingsPanelVisible;
+
+    if (m_settingsPanelVisible) {
+        ui->settingsPanel->show();
+        ui->toggleSettingsButton->setText("✕");
+        ui->toggleSettingsButton->setToolTip("关闭设置");
+    } else {
+        ui->settingsPanel->hide();
+        ui->toggleSettingsButton->setText("⚙");
+        ui->toggleSettingsButton->setToolTip("打开设置");
+    }
+}
+
+void ReadingView::updateProgressLabel()
+{
+    double hCur = ui->textBrowser->verticalScrollBar()->value();
+    double hMax = ui->textBrowser->verticalScrollBar()->maximum();
+
+    int progress = 0;
+    if (hMax > 0) {
+        progress = static_cast<int>((hCur * 100.0) / hMax);
+    }
+
+    ui->progressLabel->setText(QString("阅读进度: %1%").arg(progress));
+}
+
+// 修改现有的 onSliderChanged 函数，改为调用新函数
+void ReadingView::onSliderChanged()
+{
+    updateProgressLabel();
+}
+
 // ★★★ 关键修复4: 使用事件过滤器捕获双击事件 ★★★
 bool ReadingView::eventFilter(QObject *obj, QEvent *event)
 {
@@ -352,17 +436,18 @@ void ReadingView::onAutoScrollTimerTimeout()
 
 // ★★★ 实现新增的槽函数 ★★★
 
+// ========== 修改自动阅读按钮文本 ==========
+
 void ReadingView::on_autoScrollButton_toggled(bool checked)
 {
     if (checked) {
         startAutoScroll();
-        ui->autoScrollButton->setText("停止阅读");
+        ui->autoScrollButton->setText("⏸ 停止阅读");
     } else {
         stopAutoScroll();
-        ui->autoScrollButton->setText("自动阅读");
+        ui->autoScrollButton->setText("▶ 自动阅读");
     }
 }
-
 void ReadingView::on_speedSlider_valueChanged(int value)
 {
     SettingsManager::instance().setAutoScrollSpeed(value); // 更新全局设置
@@ -444,35 +529,43 @@ void ReadingView::parseChapters(const QString &content)
     }
 }
 void ReadingView::setBookManager(BookManager *manager)
-    {
-         m_bookManager = manager;
-    }
+{
+     m_bookManager = manager;
+}
 
 
 
-    // 4. 修复章节切换 - 添加保存进度和关键词高亮 ✅
-    void ReadingView::on_chaptersListWidget_itemClicked(QListWidgetItem *item)
-    {
-        if (!item) return;
+// 4. 修复章节切换 - 添加保存进度和关键词高亮 ✅
+void ReadingView::on_chaptersListWidget_itemClicked(QListWidgetItem *item)
+{
+    if (!item) return;
 
-        // 先保存当前进度 ✅
-        saveProgress();
+    // // 先保存当前进度 ✅
+    // saveProgress();
 
-        int index = ui->chaptersListWidget->row(item);
-        if (index >= 0 && index < m_chapterContents.size()) {
-            m_currentChapterIndex = index;
-            ui->textBrowser->setText(m_chapterContents.at(index));
-            applyBookmarksToChapter(index);
+    int index = ui->chaptersListWidget->row(item);
+    if (index >= 0 && index < m_chapterContents.size()) {
+        m_currentChapterIndex = index;
+        ui->textBrowser->setText(m_chapterContents.at(index));
 
-            // 应用关键词高亮 ✅
-            if (m_highlighter) {
-                m_highlighter->highlight();
-            }
+        ui->textBrowser->verticalScrollBar()->setValue(ConfigManager::instance().lastPage(m_currentBook.filePath));
+        ui->label_3->setText(QString::number(ConfigManager::instance().lastPage(m_currentBook.filePath) * 100.0 / ConfigManager::instance().totalPage(m_currentBook.filePath)) + "%");
 
-            bool hasText = !ui->textBrowser->toPlainText().isEmpty();
-            ui->listenButton->setEnabled(hasText);
+        // 阅读进度
+        connect(ui->textBrowser->verticalScrollBar(), &QScrollBar::valueChanged, this, &ReadingView::onSliderChanged);
+
+
+        applyBookmarksToChapter(index);
+
+        // 应用关键词高亮 ✅
+        if (m_highlighter) {
+            m_highlighter->highlight();
         }
+
+        bool hasText = !ui->textBrowser->toPlainText().isEmpty();
+        ui->listenButton->setEnabled(hasText);
     }
+}
 
 // readingview.cpp
 
@@ -512,8 +605,8 @@ void ReadingView::setBookManager(BookManager *manager)
 //                                "}"
 //                                ).arg(imagePath)
 //                                .arg(settings.textColor().name())
-//                                .arg(settings.fontFamily())       // 【新增】传入字体家族参数
-//                                .arg(settings.fontSize());       // 【新增】传入字体大小参数;
+//                                .arg(settings.fontFamily())       // 【新增】字体家族参数
+//                                .arg(settings.fontSize());       // 【新增】字体大小参数;
 
 //             // 为 QListWidget 准备样式表
 //             listStyle = QString(
@@ -594,6 +687,7 @@ void ReadingView::setBookManager(BookManager *manager)
 
             ui->textBrowser->setStyleSheet(imageStyle);
             ui->chaptersListWidget->setStyleSheet(imageStyle);
+
             return; // 处理完毕，直接返回
         }
 
@@ -640,7 +734,42 @@ void ReadingView::setBookManager(BookManager *manager)
 
         ui->textBrowser->setStyleSheet(style);
         ui->chaptersListWidget->setStyleSheet(style);
+
+        // 为侧边栏面板设置样式
+        QString panelStyle;
+        if (settings.isNightMode()) {
+            panelStyle = "QWidget#chapterPanel, QWidget#settingsPanel { "
+                         "background-color: #2C3E50; "
+                         "border-right: 1px solid #34495E; "
+                         "}";
+        } else {
+            panelStyle = "QWidget#chapterPanel, QWidget#settingsPanel { "
+                         "background-color: #F5F5F5; "
+                         "border-right: 1px solid #E0E0E0; "
+                         "}";
+        }
+
+        ui->chapterPanel->setStyleSheet(panelStyle);
+        ui->settingsPanel->setStyleSheet(panelStyle.replace("border-right", "border-left"));
+
+        // 顶部工具栏样式
+        QString toolbarStyle;
+        if (settings.isNightMode()) {
+            toolbarStyle = "QWidget#topToolBar { "
+                           "background-color: #34495E; "
+                           "border-bottom: 1px solid #2C3E50; "
+                           "}";
+        } else {
+            toolbarStyle = "QWidget#topToolBar { "
+                           "background-color: #FFFFFF; "
+                           "border-bottom: 1px solid #E0E0E0; "
+                           "}";
+        }
+        ui->topToolBar->setStyleSheet(toolbarStyle);
     }
+
+
+
 void ReadingView::showContextMenu(const QPoint &pos)
 {
     if (!m_bookManager) return;
@@ -675,6 +804,9 @@ void ReadingView::addBookmarkFromSelection()
     QTextCursor cursor = ui->textBrowser->textCursor();
     if (!cursor.hasSelection()) return;
 
+    // 保存当前滚动位置
+    int scrollPosition = ui->textBrowser->verticalScrollBar()->value();
+
     QList<BookmarkInfo> bookmarks = m_bookManager->getBookmarks(m_currentBook.filePath);
     BookmarkInfo newBookmark;
     newBookmark.chapterIndex = m_currentChapterIndex;
@@ -684,11 +816,19 @@ void ReadingView::addBookmarkFromSelection()
     newBookmark.backgroundColor = QColor(255, 255, 0, 50);
     newBookmark.underlineStyle = QTextCharFormat::DashUnderline;
     newBookmark.underlineColor = Qt::gray;
+    newBookmark.type = BookmarkInfo::Bookmark; // 明确设置为书签类型
+    newBookmark.content = cursor.selectedText(); // 保存选中的文本内容
 
     bookmarks.append(newBookmark);
     m_bookManager->addBookmarks(m_currentBook.filePath, bookmarks);
 
-    on_chaptersListWidget_itemClicked(ui->chaptersListWidget->currentItem());
+    // 重新应用书签，但不切换章节
+    applyBookmarksToChapter(m_currentChapterIndex);
+    
+    // 恢复滚动位置
+    QTimer::singleShot(0, this, [this, scrollPosition]() {
+        ui->textBrowser->verticalScrollBar()->setValue(scrollPosition);
+    });
 }
 
 void ReadingView::removeBookmark()
@@ -696,6 +836,9 @@ void ReadingView::removeBookmark()
     if (!m_bookManager) return;
     QAction* action = qobject_cast<QAction*>(sender());
     if (!action) return;
+
+    // 保存当前滚动位置
+    int scrollPosition = ui->textBrowser->verticalScrollBar()->value();
 
     int dbId = action->data().toInt();
     QList<BookmarkInfo> bookmarks = m_bookManager->getBookmarks(m_currentBook.filePath);
@@ -706,7 +849,22 @@ void ReadingView::removeBookmark()
     if(dbId >= 0 && dbId < bookmarks.size()){
         bookmarks.removeAt(dbId);
         m_bookManager->addBookmarks(m_currentBook.filePath, bookmarks);
-        on_chaptersListWidget_itemClicked(ui->chaptersListWidget->currentItem());
+        
+        // 清除所有格式并重新应用书签
+        ui->textBrowser->document()->clearUndoRedoStacks();
+        QTextCursor cursor = ui->textBrowser->textCursor();
+        cursor.select(QTextCursor::Document);
+        QTextCharFormat plainFormat;
+        cursor.setCharFormat(plainFormat);
+        cursor.clearSelection();
+        
+        // 重新应用书签，但不切换章节
+        applyBookmarksToChapter(m_currentChapterIndex);
+        
+        // 恢复滚动位置
+        QTimer::singleShot(0, this, [this, scrollPosition]() {
+            ui->textBrowser->verticalScrollBar()->setValue(scrollPosition);
+        });
     }
 }
 
@@ -761,10 +919,22 @@ void ReadingView::applyBookmarksToChapter(int chapterIndex)
     for (int i = 0; i < bookmarks.size(); ++i) {
         const auto& bookmark = bookmarks[i];
         if (bookmark.chapterIndex == chapterIndex) {
+            // 检查该位置是否已经有搜索高亮
+            cursor.setPosition(bookmark.startPos);
+            QTextCharFormat existingFormat = cursor.charFormat();
+            bool hasSearchHighlight = existingFormat.property(QTextFormat::UserProperty + 1).toString() == "search_highlight";
+            
             QTextCharFormat format;
-            format.setBackground(bookmark.backgroundColor);
-            format.setUnderlineStyle(static_cast<QTextCharFormat::UnderlineStyle>(bookmark.underlineStyle));
-            format.setUnderlineColor(bookmark.underlineColor);
+            if (!hasSearchHighlight) {
+                // 只有在没有搜索高亮时才应用书签格式
+                format.setBackground(bookmark.backgroundColor);
+                format.setUnderlineStyle(static_cast<QTextCharFormat::UnderlineStyle>(bookmark.underlineStyle));
+                format.setUnderlineColor(bookmark.underlineColor);
+            } else {
+                // 如果有搜索高亮，只应用下划线样式，保留搜索高亮的背景色
+                format.setUnderlineStyle(static_cast<QTextCharFormat::UnderlineStyle>(bookmark.underlineStyle));
+                format.setUnderlineColor(bookmark.underlineColor);
+            }
             // ★★★ 关键：用 UserProperty 存一个唯一ID (这里用索引代替) ★★★
             format.setProperty(QTextFormat::UserProperty, i);
 
@@ -782,21 +952,26 @@ void ReadingView::applyBookmarksToChapter(int chapterIndex)
 }
 
 
+// 1. findText - 初始搜索
 void ReadingView::findText(const QString& text, bool caseSensitive)
 {
     if (text.isEmpty()) return;
 
+    // 保存搜索参数
     m_lastSearchText = text;
     m_lastSearchCaseSensitive = caseSensitive;
+
+    // 先清除所有搜索高亮
+    clearSearchHighlights();
 
     QTextDocument::FindFlags flags;
     if (caseSensitive) {
         flags |= QTextDocument::FindCaseSensitively;
     }
 
-    // 先在当前章节搜索
+    // 在当前章节从头开始搜索
     QTextCursor cursor = ui->textBrowser->textCursor();
-    cursor.setPosition(0); // 从文档开头开始搜索
+    cursor.setPosition(0);
     ui->textBrowser->setTextCursor(cursor);
 
     bool found = ui->textBrowser->find(text, flags);
@@ -805,227 +980,158 @@ void ReadingView::findText(const QString& text, bool caseSensitive)
         return;
     }
 
-    // 如果当前章节未找到，则在其他章节中搜索
-    int originalChapter = m_currentChapter;
+    // 如果当前章节未找到，搜索其他章节
+    int originalChapter = m_currentChapterIndex;
 
     // 从下一章开始搜索
     for (int i = 1; i < m_chapterContents.size(); i++) {
         int chapterToSearch = (originalChapter + i) % m_chapterContents.size();
 
-        // 检查该章节内容是否包含搜索文本
         if (m_chapterContents[chapterToSearch].contains(text,
                                                         caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
-            // 切换到包含文本的章节
-            m_currentChapter = chapterToSearch;
-            ui->chaptersListWidget->setCurrentRow(chapterToSearch);
-            ui->textBrowser->setText(m_chapterContents.at(chapterToSearch));
+            // 切换章节
+            switchToChapter(chapterToSearch);
 
-            // 在新章节中搜索
+            // 从头搜索
             cursor = ui->textBrowser->textCursor();
             cursor.setPosition(0);
             ui->textBrowser->setTextCursor(cursor);
 
             if (ui->textBrowser->find(text, flags)) {
                 highlightFoundText(ui->textBrowser->textCursor());
-                QMessageBox::information(this, "查找结果",
-                                         QString("在第 %1 章找到匹配文本").arg(chapterToSearch + 1));
                 return;
             }
         }
     }
 
-    // 如果所有章节都未找到
-    QMessageBox::information(this, "查找结果", "在全书中未找到匹配文本");
-
-    // 恢复到原始章节
-    if (m_currentChapter != originalChapter) {
-        m_currentChapter = originalChapter;
-        ui->chaptersListWidget->setCurrentRow(originalChapter);
-        ui->textBrowser->setText(m_chapterContents.at(originalChapter));
-    }
+    // 所有章节都未找到（静默返回）
+    return;
 }
 
-void ReadingView::findNext()
-{
-    clearHighlights(); // *** 调用新的清除函数 ***
-    if (m_lastSearchText.isEmpty()) return;
+    // 7. clearHighlights - 清除所有高亮
+    void ReadingView::clearHighlights()
+    {
+        // 只清除搜索高亮
+        clearSearchHighlights();
 
-    QTextDocument::FindFlags flags;
-    if (m_lastSearchCaseSensitive) {
-        flags |= QTextDocument::FindCaseSensitively;
+        // 重新应用书签和关键词高亮
+        if (m_currentChapterIndex >= 0) {
+            applyBookmarksToChapter(m_currentChapterIndex);
+        }
+
+        if (m_highlighter) {
+            QTimer::singleShot(0, m_highlighter, &KeyWordHighlighter::highlight);
+        }
     }
 
-    // 先在当前章节的当前位置之后搜索
-    bool found = ui->textBrowser->find(m_lastSearchText, flags);
-    if (found) {
+    // readingview.cpp
+
+    void ReadingView::findNext()
+    {
+        if (m_lastSearchText.isEmpty()) return;
+
+        QTextDocument::FindFlags flags;
+        if (m_lastSearchCaseSensitive) {
+            flags |= QTextDocument::FindCaseSensitively;
+        }
+
+        // 向前查找；未找到则静默回到文档开头
+        if (!ui->textBrowser->find(m_lastSearchText, flags)) {
+            QTextCursor c = ui->textBrowser->textCursor();
+            c.movePosition(QTextCursor::Start);
+            ui->textBrowser->setTextCursor(c);
+            ui->textBrowser->find(m_lastSearchText, flags);
+        }
+
+        // 统一高亮当前选中结果
         highlightFoundText(ui->textBrowser->textCursor());
-        return;
     }
+    // 3. findPrevious - 查找上一个（完全重写，修复无响应问题）
+    // readingview.cpp
 
-    // 如果当前章节没有找到，搜索后续章节
-    int originalChapter = m_currentChapter;
+    void ReadingView::findPrevious()
+    {
+        if (m_lastSearchText.isEmpty()) return;
 
-    for (int i = 1; i < m_chapterContents.size(); i++) {
-        int chapterToSearch = (originalChapter + i) % m_chapterContents.size();
-
-        // 检查该章节内容是否包含搜索文本
-        if (m_chapterContents[chapterToSearch].contains(m_lastSearchText,
-                                                        m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
-
-            // 切换到包含文本的章节
-            m_currentChapter = chapterToSearch;
-            ui->chaptersListWidget->setCurrentRow(chapterToSearch);
-            ui->textBrowser->setText(m_chapterContents.at(chapterToSearch));
-
-            // 在新章节中从头搜索
-            QTextCursor cursor = ui->textBrowser->textCursor();
-            cursor.setPosition(0);
-            ui->textBrowser->setTextCursor(cursor);
-
-            if (ui->textBrowser->find(m_lastSearchText, flags)) {
-                highlightFoundText(ui->textBrowser->textCursor());
-                return;
-            }
+        QTextDocument::FindFlags flags = QTextDocument::FindBackward;
+        if (m_lastSearchCaseSensitive) {
+            flags |= QTextDocument::FindCaseSensitively;
         }
-    }
 
-    // 如果所有后续章节都没找到，从第一章重新开始搜索
-    if (originalChapter > 0) {
-        for (int i = 0; i < originalChapter; i++) {
-            if (m_chapterContents[i].contains(m_lastSearchText,
-                                              m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
-
-                m_currentChapter = i;
-                ui->chaptersListWidget->setCurrentRow(i);
-                ui->textBrowser->setText(m_chapterContents.at(i));
-
-                QTextCursor cursor = ui->textBrowser->textCursor();
-                cursor.setPosition(0);
-                ui->textBrowser->setTextCursor(cursor);
-
-                if (ui->textBrowser->find(m_lastSearchText, flags)) {
-                    highlightFoundText(ui->textBrowser->textCursor());
-                    return;
-                }
-            }
+        // 向后查找；未找到则静默回到文档末尾
+        if (!ui->textBrowser->find(m_lastSearchText, flags)) {
+            QTextCursor c = ui->textBrowser->textCursor();
+            c.movePosition(QTextCursor::End);
+            ui->textBrowser->setTextCursor(c);
+            ui->textBrowser->find(m_lastSearchText, flags);
         }
-    }
 
-    // 如果全文都没找到更多匹配
-    QMessageBox::information(this, "查找结果", "已到达最后一个匹配项");
-}
-
-void ReadingView::findPrevious()
-{
-    clearHighlights(); // ★★★ 调用新的清除函数 ★★★
-    if (m_lastSearchText.isEmpty()) return;
-
-    QTextDocument::FindFlags flags = QTextDocument::FindBackward;
-    if (m_lastSearchCaseSensitive) {
-        flags |= QTextDocument::FindCaseSensitively;
-    }
-
-    // 先在当前章节的当前位置之前搜索
-    bool found = ui->textBrowser->find(m_lastSearchText, flags);
-    if (found) {
+        // 统一高亮当前选中结果
         highlightFoundText(ui->textBrowser->textCursor());
-        return;
     }
+    // 4. switchToChapter - 新增辅助函数，安全地切换章节
+    void ReadingView::switchToChapter(int chapterIndex)
+    {
+        if (chapterIndex < 0 || chapterIndex >= m_chapterContents.size()) {
+            return;
+        }
 
-    // 如果当前章节没有找到，搜索前面的章节
-    int originalChapter = m_currentChapter;
+        m_currentChapterIndex = chapterIndex;
+        m_currentChapter = chapterIndex; // 确保两个变量同步更新
 
-    for (int i = 1; i <= originalChapter; i++) {
-        int chapterToSearch = originalChapter - i;
+        // 更新章节列表选中状态（不触发信号）
+        ui->chaptersListWidget->blockSignals(true);
+        ui->chaptersListWidget->setCurrentRow(chapterIndex);
+        ui->chaptersListWidget->blockSignals(false);
 
-        // 检查该章节内容是否包含搜索文本
-        if (m_chapterContents[chapterToSearch].contains(m_lastSearchText,
-                                                        m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+        // 完全清空并重新设置文本
+        ui->textBrowser->clear();
+        ui->textBrowser->setPlainText(m_chapterContents.at(chapterIndex));
 
-            // 切换到包含文本的章节
-            m_currentChapter = chapterToSearch;
-            ui->chaptersListWidget->setCurrentRow(chapterToSearch);
-            ui->textBrowser->setText(m_chapterContents.at(chapterToSearch));
+        // 重新应用书签格式
+        applyBookmarksToChapter(chapterIndex);
 
-            // 在新章节中从尾部向前搜索
-            QTextCursor cursor = ui->textBrowser->textCursor();
-            cursor.setPosition(ui->textBrowser->document()->characterCount() - 1);
-            ui->textBrowser->setTextCursor(cursor);
-
-            if (ui->textBrowser->find(m_lastSearchText, flags)) {
-                highlightFoundText(ui->textBrowser->textCursor());
-                return;
-            }
+        // 重新应用关键词高亮
+        if (m_highlighter) {
+            m_highlighter->highlight();
         }
     }
-
-    // 如果所有前面章节都没找到，从最后一章开始向前搜索
-    if (originalChapter < m_chapterContents.size() - 1) {
-        for (int i = m_chapterContents.size() - 1; i > originalChapter; i--) {
-            if (m_chapterContents[i].contains(m_lastSearchText,
-                                              m_lastSearchCaseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
-
-                m_currentChapter = i;
-                ui->chaptersListWidget->setCurrentRow(i);
-                ui->textBrowser->setText(m_chapterContents.at(i));
-
-                QTextCursor cursor = ui->textBrowser->textCursor();
-                cursor.setPosition(ui->textBrowser->document()->characterCount() - 1);
-                ui->textBrowser->setTextCursor(cursor);
-
-                if (ui->textBrowser->find(m_lastSearchText, flags)) {
-                    highlightFoundText(ui->textBrowser->textCursor());
-                    return;
-                }
-            }
-        }
+void ReadingView::applyKeywordHighlighting()
+{
+    if (m_highlighter) {
+        m_highlighter->highlight();
     }
-
-    // 如果全文都没找到更多匹配
-    QMessageBox::information(this, "查找结果", "已到达第一个匹配项");
 }
 
-// 8. 修复highlightFoundText - Qt 6 兼容版本 ✅
+// 5. highlightFoundText - 高亮找到的文本（使用 ExtraSelections 叠加，不修改正文格式）
 void ReadingView::highlightFoundText(const QTextCursor& cursor)
 {
-    auto& settings = SettingsManager::instance();
-
-    // 先清除所有格式
-    QTextCursor resetCursor(ui->textBrowser->document());
-    resetCursor.select(QTextCursor::Document);
-    QTextCharFormat defaultFormat;
-    defaultFormat.setBackground(Qt::transparent);
-    defaultFormat.setForeground(settings.textColor());
-    resetCursor.mergeCharFormat(defaultFormat);
-
-    // 应用新的搜索高亮
-    QColor highlightColor = settings.isNightMode() ?
-                                QColor("#40E0D0") : QColor("#FBBF24");
-    QColor highlightTextColor = QColor("#000000");
-
-    QTextCharFormat format;
-    format.setBackground(highlightColor);
-    format.setForeground(highlightTextColor);
-
-    QTextCursor highlightCursor = cursor;
-    if (!highlightCursor.hasSelection()) {
-        highlightCursor.select(QTextCursor::WordUnderCursor);
+    if (!cursor.hasSelection()) {
+        return;
     }
 
-    highlightCursor.mergeCharFormat(format);
-    highlightCursor.clearSelection();
-    ui->textBrowser->setTextCursor(highlightCursor);
+    // 验证选中的文本是否匹配搜索内容
+    QString selectedText = cursor.selectedText();
+    bool isMatch = m_lastSearchCaseSensitive
+                       ? (selectedText == m_lastSearchText)
+                       : (selectedText.compare(m_lastSearchText, Qt::CaseInsensitive) == 0);
+    if (!isMatch) {
+        return;
+    }
+
+    // 构造叠加高亮选区（不更改文档的字符格式）
+    QTextEdit::ExtraSelection sel;
+    sel.cursor = cursor;
+    sel.format.setBackground(QColor("#FFE58F"));
+
+    QList<QTextEdit::ExtraSelection> selections;
+    selections << sel; // 只高亮当前匹配
+    ui->textBrowser->setExtraSelections(selections);
+
+    // 保持光标并确保可见
+    ui->textBrowser->setTextCursor(cursor);
     ui->textBrowser->ensureCursorVisible();
-
-    m_currentPosition = ui->textBrowser->verticalScrollBar()->value();
-
-    // 重新应用书签和关键词高亮 ✅
-    applyBookmarksToChapter(m_currentChapterIndex);
-    if (m_highlighter) {
-        QTimer::singleShot(10, m_highlighter, &KeyWordHighlighter::highlight);
-    }
 }
-
 // 翻页功能
 void ReadingView::nextPage()
 {
@@ -1035,11 +1141,9 @@ void ReadingView::nextPage()
 
     // 如果已经到达当前章节底部，切换到下一章
     if (currentValue + pageStep >= scrollBar->maximum()) {
-        if (m_currentChapter < m_chapterContents.size() - 1) {
-            m_currentChapter++;
-            ui->chaptersListWidget->setCurrentRow(m_currentChapter);
-            ui->textBrowser->setText(m_chapterContents.at(m_currentChapter));
-            scrollBar->setValue(0); // 从新章节顶部开始
+        if (m_currentChapterIndex < m_chapterContents.size() - 1) {  // ✅ 使用正确的变量
+            switchToChapter(m_currentChapterIndex + 1);  // ✅ 使用 switchToChapter
+            ui->textBrowser->verticalScrollBar()->setValue(0);
         }
     } else {
         // 否则向下滚动一页
@@ -1058,11 +1162,13 @@ void ReadingView::previousPage()
 
     // 如果已经到达当前章节顶部，切换到上一章
     if (currentValue <= 0) {
-        if (m_currentChapter > 0) {
-            m_currentChapter--;
-            ui->chaptersListWidget->setCurrentRow(m_currentChapter);
-            ui->textBrowser->setText(m_chapterContents.at(m_currentChapter));
-            scrollBar->setValue(scrollBar->maximum()); // 从上一章节底部开始
+        if (m_currentChapterIndex > 0) {  // ✅ 使用正确的变量
+            switchToChapter(m_currentChapterIndex - 1);  // ✅ 使用 switchToChapter
+            QTimer::singleShot(50, this, [this]() {
+                ui->textBrowser->verticalScrollBar()->setValue(
+                    ui->textBrowser->verticalScrollBar()->maximum()
+                    );
+            });
         }
     } else {
         // 否则向上滚动一页
@@ -1072,6 +1178,8 @@ void ReadingView::previousPage()
     // 更新当前位置
     m_currentPosition = scrollBar->value();
 }
+
+
 
 
 
@@ -1393,11 +1501,13 @@ void ReadingView::onListenButtonClicked()
 }
 
 // 其他函数保持不变...
-void ReadingView::onPlayerPauseRequested() {
+void ReadingView::onPlayerPauseRequested()
+{
     m_player->pause();
 }
 
-void ReadingView::onPlayerResumeRequested() {
+void ReadingView::onPlayerResumeRequested()
+{
     m_player->play();
 }
 
@@ -1436,23 +1546,77 @@ void ReadingView::unhighlightAll()
 }
 
 //////////////////
-void ReadingView::onSliderChanged()
-{
-    double hCur = ui->textBrowser->verticalScrollBar()->value();
-    double hMax = ui->textBrowser->verticalScrollBar()->maximum();
-    if(hMax <= 0) {
-        ui->label_3->setText(QString::number(0) + "%");
-    } else {
-        ui->label_3->setText(QString::number(hCur * 100.0 / hMax) + "%");
-    }
-}
+
 void ReadingView::notepad()
 {
-    QDialog* qdialog = new QDialog();
-    qdialog->setMinimumSize(280,350);
-    NotePadWidget* qwidget = new NotePadWidget(qdialog);
-    qdialog->setAttribute(Qt::WA_DeleteOnClose);
-    qdialog->exec();
+    QDialog* dialog = new QDialog(this);
+    dialog->setWindowTitle("添加笔记");
+    dialog->setMinimumSize(400, 300);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(dialog);
+
+    // 标题输入
+    QLabel* titleLabel = new QLabel("笔记标题:", dialog);
+    QLineEdit* titleEdit = new QLineEdit(dialog);
+    titleEdit->setPlaceholderText("请输入笔记标题");
+
+    // 内容输入
+    QLabel* contentLabel = new QLabel("笔记内容:", dialog);
+    QTextEdit* contentEdit = new QTextEdit(dialog);
+    contentEdit->setPlaceholderText("在这里写笔记内容...");
+
+    // 按钮
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    QPushButton* saveButton = new QPushButton("保存", dialog);
+    QPushButton* cancelButton = new QPushButton("取消", dialog);
+    buttonLayout->addWidget(saveButton);
+    buttonLayout->addWidget(cancelButton);
+
+    // 布局
+    mainLayout->addWidget(titleLabel);
+    mainLayout->addWidget(titleEdit);
+    mainLayout->addWidget(contentLabel);
+    mainLayout->addWidget(contentEdit);
+    mainLayout->addLayout(buttonLayout);
+
+    // 连接信号
+    connect(saveButton, &QPushButton::clicked, [=]() {
+        QString title = titleEdit->text().trimmed();
+        QString content = contentEdit->toPlainText().trimmed();
+
+        if (title.isEmpty()) {
+            QMessageBox::warning(dialog, "提示", "笔记标题不能为空！");
+            return;
+        }
+
+        if (content.isEmpty()) {
+            QMessageBox::warning(dialog, "提示", "笔记内容不能为空！");
+            return;
+        }
+
+        // 保存笔记到书签系统
+        if (m_bookManager) {
+            QList<BookmarkInfo> bookmarks = m_bookManager->getBookmarks(m_currentBook.filePath);
+
+            BookmarkInfo newNote;
+            newNote.type = BookmarkInfo::Note;
+            newNote.chapterIndex = m_currentChapterIndex;  // ✅ 使用正确的变量
+            newNote.startPos = ui->textBrowser->textCursor().position();
+            newNote.endPos = newNote.startPos;
+            newNote.content = QString("%1\n\n%2").arg(title).arg(content);
+
+            bookmarks.append(newNote);
+            m_bookManager->addBookmarks(m_currentBook.filePath, bookmarks);
+
+            QMessageBox::information(dialog, "成功", "笔记已保存！");
+            dialog->accept();
+        }
+    });
+
+    connect(cancelButton, &QPushButton::clicked, dialog, &QDialog::reject);
+
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->exec();
 }
 
 // 6. 修复关键词对话框 ✅
@@ -1474,26 +1638,10 @@ void ReadingView::saveProgress()
     ConfigManager::instance().setTotalPage(m_currentBook.filePath, ui->textBrowser->verticalScrollBar()->maximum());
 }
 
-// 在 readingview.cpp 中添加此函数实现
-
-void ReadingView::clearHighlights()
+// 清除搜索高亮的专用函数
+// 6. clearSearchHighlights - 清除搜索高亮（清空 ExtraSelections）
+void ReadingView::clearSearchHighlights()
 {
-    // 清除所有搜索高亮
-    QTextCursor cursor(ui->textBrowser->document());
-    cursor.select(QTextCursor::Document);
-
-    QTextCharFormat defaultFormat;
-    defaultFormat.setBackground(Qt::transparent);
-    defaultFormat.setForeground(SettingsManager::instance().textColor());
-
-    cursor.mergeCharFormat(defaultFormat);
-
-    // 重新应用书签和关键词高亮 ✅
-    if (m_currentChapterIndex >= 0) {
-        applyBookmarksToChapter(m_currentChapterIndex);
-    }
-
-    if (m_highlighter) {
-        QTimer::singleShot(0, m_highlighter, &KeyWordHighlighter::highlight);
-    }
+    // 使用 ExtraSelections 叠加的高亮，直接清空即可
+    ui->textBrowser->setExtraSelections({});
 }

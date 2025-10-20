@@ -2,6 +2,7 @@
 #define SIDENAVIGATIONVIEW_H
 //时钟
 #include "timerwindow.h"//***新加***
+#include "myprofileview.h"
 #include <QWidget>
 #include <QListWidgetItem>
 // 前向声明 BookManager，避免在头文件中引入完整的类定义，
@@ -57,6 +58,9 @@ private:
 
     //time
     TimerWindow *m_timerWindow = nullptr;//***新加***
+    
+    // 我的界面视图
+    MyProfileView *m_myProfileView = nullptr;
 };
 
 #endif // SIDENAVIGATIONVIEW_H

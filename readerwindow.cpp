@@ -48,10 +48,10 @@ ReaderWindow::ReaderWindow(const BookInfo& book, BookManager* bookManager, QWidg
 
     // // 4. 连接信号和槽
     // connect(fontComboBox, &QFontComboBox::currentFontChanged, this, [&](const QFont& font){
-    //     settings.setFontFamily(font.family());
-    // });
-    // connect(fontSizeSpinBox, &QSpinBox::valueChanged, this, [&](int size){
-    //     settings.setFontSize(size);
+       //     settings.setFontFamily(font.family());
+       // });
+       // connect(fontSizeSpinBox, &QSpinBox::valueChanged, this, [&](int size){
+       //     settings.setFontSize(size);
     // });
     // connect(nightModeButton, &QPushButton::toggled, this, [&](bool checked){
     //     settings.setNightMode(checked);
@@ -127,4 +127,12 @@ ReaderWindow::ReaderWindow(const BookInfo& book, BookManager* bookManager, QWidg
 ReaderWindow::~ReaderWindow()
 {
     delete ui;
+}
+
+// 跳转到指定章节和位置
+void ReaderWindow::jumpToChapter(int chapterIndex, const QString& position)
+{
+    // 实现跳转逻辑
+    // 这里可以调用readingView的相关方法进行跳转
+    // 例如: ui->readingView->jumpToChapter(chapterIndex, position);
 }

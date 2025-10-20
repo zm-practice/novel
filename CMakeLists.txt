@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.16)
 
 project(demo3_QT VERSION 0.1 LANGUAGES CXX)
 
+# 设置构建目录为当前源代码目录
+set(CMAKE_BINARY_DIR ${CMAKE_SOURCE_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -66,7 +70,7 @@ add_executable(demo3_QT ${PROJECT_SOURCES}
         notepadwidget.h
         style.qrc
         style.qss
-
+        myprofileview.h myprofileview.cpp myprofileview.ui
 
 
 )
